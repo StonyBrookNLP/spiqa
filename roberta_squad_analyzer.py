@@ -15,11 +15,11 @@ RES_FIG_PATH = "./res_fig/"
 PARAM_PATH = "./params/"
 
 
-def run_qa_pipeline():
+def run_qa_pipeline(model_name: str):
     qa_pipeline = pipeline(
         "question-answering",
-        model="csarron/roberta-base-squad-v1",
-        tokenizer="csarron/roberta-base-squad-v1"
+        model=model_name,
+        tokenizer=model_name
     )
 
     predictions = qa_pipeline({
@@ -27,13 +27,15 @@ def run_qa_pipeline():
         'question': "What day was the game played on?"
     })
 
-    print(predictions)
+    return predictions
 
 
-def get_hstates_attens(model_name: str):
+def get_hstates_attens(model_name: str, force_reinfer=False):
     all_hidden_states, all_attentions = None, None
     # read from file
-    if os.path.isfile(PARAM_PATH+'hidden_states.npy') and os.path.isfile(PARAM_PATH+'attentions.npy'):
+    if os.path.isfile(PARAM_PATH+'hidden_states.npy') and \
+            os.path.isfile(PARAM_PATH+'attentions.npy') and \
+            not force_reinfer:
         print("Loading parameters from file...")
         with open(PARAM_PATH+"hidden_states.npy", "rb") as h_states_file:
             all_hidden_states = np.load(h_states_file)
@@ -44,32 +46,10 @@ def get_hstates_attens(model_name: str):
     # extract parameters from model
     else:
         print("Parameter files not found, extracting them from model...")
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModelForQuestionAnswering.from_pretrained(model_name)
+        predictions = run_qa_pipeline(model_name)
 
-        answers = ["HuggingFace is based in NYC",
-                   "New York City is not the capital of New York State"]
-        questions = ["Where is HuggingFace based?", "Is New York City a capital city?"]
-
-        # encode and padding
-        input_ids = []
-        max_len = 0
-        for qa_pair in zip(questions, answers):
-            input_ids.append(tokenizer(qa_pair[0], qa_pair[1])["input_ids"])
-            if len(input_ids[-1]) > max_len:
-                max_len = len(input_ids[-1])
-
-        padded_qa = torch.tensor([i + [0]*(max_len-len(i)) for i in input_ids])
-        attention_mask = torch.tensor(np.where(padded_qa != 0, 1, 0))
-
-        with torch.no_grad():
-            outputs = model(padded_qa, attention_mask=attention_mask,
-                            output_attentions=True, output_hidden_states=True, return_dict=True)
-
-        def convert_var_to_np(x): return np.asarray(
-            [layer.numpy() for layer in outputs[x]])
         all_hidden_states, all_attentions = \
-            convert_var_to_np('hidden_states'), convert_var_to_np('attentions')
+            predictions['hidden_states'], predictions['attentions']
         print("hidden_state dim: ", all_hidden_states.shape,
               "attention dim:", all_attentions.shape)
         with open(PARAM_PATH+"hidden_states.npy", "wb+") as h_states_file:
@@ -117,7 +97,7 @@ def plot_dist(data, sparsity_bar=0.025, bin_step=float('Nan')):
         fig.suptitle(
             'Histogram of Layer {}\'s Attention per head (batch aggregation=sum)'.format(layer_idx), fontsize=21, y=0.99)
         fig.tight_layout()
-        plt.savefig(RES_FIG_PATH+'hist_layer{}.svg'.format(layer_idx))
+        plt.savefig(RES_FIG_PATH+'hist_layer{}.pdf'.format(layer_idx))
         plt.clf()
 
 
@@ -133,6 +113,7 @@ def plot_heatmap(data, sparsity_bar=0.025):
     for layer_idx, layer in enumerate(data):
         fig, axs = plt.subplots(3, 4, figsize=(19, 12))
         for head_idx, head in enumerate(layer):
+            print("Plotting heatmap for layer {} head {}...".format(layer_idx, head_idx))
             sparsity = (head <= sparsity_bar).sum() / head.flatten().shape[0]
             ax = axs[int(head_idx/4), int(head_idx % 4)]
             c = ax.pcolor(head)
@@ -144,13 +125,13 @@ def plot_heatmap(data, sparsity_bar=0.025):
         fig.suptitle(
             'Heatmap of Layer {}\'s Attention per head (batch aggregation=sum)'.format(layer_idx), fontsize=21, y=0.99)
         fig.tight_layout()
-        plt.savefig(RES_FIG_PATH+'heatmap_layer{}.svg'.format(layer_idx))
+        plt.savefig(RES_FIG_PATH+'heatmap_layer{}.png'.format(layer_idx))
         plt.clf()
 
 
 if __name__ == '__main__':
-    h_states, attens = get_hstates_attens("csarron/roberta-base-squad-v1")
+    h_states, attens = get_hstates_attens("csarron/roberta-base-squad-v1", force_reinfer=False)
     # aggregrate attention by sum
-    atten = np.sum(attens, axis=1)
+    atten = np.mean(attens, axis=1)
     # plot_dist(atten, sparsity_bar=0.05, bin_step=0.05)
     plot_heatmap(atten, sparsity_bar=0.05)

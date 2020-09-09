@@ -1,0 +1,3 @@
+[submodule "transformers"]
+	path = transformers
+	url = ssh://git@compas.cs.stonybrook.edu:1122/tianchu.ji/compas-forked-huggingface.git

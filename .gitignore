@@ -6,6 +6,3 @@
 *.pdf
 *.png
 *.jpg
-
-# ignore huggingface github repo
-transformers
