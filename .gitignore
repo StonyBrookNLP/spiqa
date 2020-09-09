@@ -1,0 +1,11 @@
+# editors
+.vscode
+
+# figure res
+*.svg
+*.pdf
+*.png
+*.jpg
+
+# ignore huggingface github repo
+transformers
