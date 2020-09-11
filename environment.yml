@@ -1,0 +1,13 @@
+name: nlp
+channels:
+  - defaults
+dependencies:
+  - tensorflow-gpu
+  - pandas
+  - numpy
+  - scikit-learn
+  - torchvision
+  - pytorch
+  - jupyterlab
+  - matplotlib
+  - autopep8
