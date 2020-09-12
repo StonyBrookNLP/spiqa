@@ -7,7 +7,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 import argparse
-import os.path
+import os
+from subprocess import call
 from math import isnan
 from textwrap import wrap
 import urllib.request
@@ -18,6 +19,8 @@ RES_FIG_PATH = "./res_fig/"
 PARAM_PATH = "./params/"
 DATA_PATH = "./data/"
 
+def screen_clear():
+   _ = call('clear' if os.name =='posix' else 'cls')
 
 def parse_squad_json(squad_ver='v2.0'):
     FILE_PATH = DATA_PATH+"dev-"+squad_ver+".json"
@@ -45,7 +48,7 @@ def parse_squad_json(squad_ver='v2.0'):
     return data
 
 
-def run_qa_pipeline(model_name: str, chain_different_paragraph=False):
+def run_qa_pipeline(model_name: str, filter_inputs=True):
     qa_pipeline = pipeline(
         "question-answering",
         model=model_name,
@@ -67,32 +70,38 @@ def run_qa_pipeline(model_name: str, chain_different_paragraph=False):
     # TODO: parameterize the length selector
     len_filter = [1 if 600 < i < 700 else 0 for i in input_lens]
     filtered_associated_data = list(compress(associated_data, len_filter))
-    print("Among all inputs {}/{} are selected.".format(len(filtered_associated_data), len(associated_data)))
+    fed_data = filtered_associated_data if filter_inputs else associated_data
 
-    res = None
-    for qa_pair in filtered_associated_data:
+    res, pipeline_running_counter, fed_data_len = None, 0, len(fed_data)
+    print("Among all inputs {}/{} are selected.".format(fed_data_len, len(associated_data)))
+    for qa_pair in fed_data:
+        print("running pipeline iter {}/{}...".format(pipeline_running_counter, fed_data_len))
         prediction = qa_pipeline(qa_pair)
         if res is None:
             res = {'score': prediction['score'], 'hidden_states': prediction['hidden_states'],
                    'attentions': prediction['attentions']}
         else:
-            res['score'] = (res['score'] + prediction['score'])/2
-            res['hidden_states'] = np.mean(np.concatenate(
+            res['score'] = (res['score'] + prediction['score'])
+            res['hidden_states'] = np.sum(np.concatenate(
                 [prediction['hidden_states'], res['hidden_states']], axis=1), axis=1, keepdims=True)
-            res['attentions'] = np.mean(np.concatenate(
+            res['attentions'] = np.sum(np.concatenate(
                 [prediction['attentions'], res['attentions']], axis=1), axis=1, keepdims=True)
 
+        pipeline_running_counter += 1
+        screen_clear()
+
+    res['qa_pair_len'] = fed_data_len
     return res
 
 
-def get_hstates_attens(model_name: str, force_reinfer=False):
+def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True, layer_aggregration='mean'):
     '''
     get the hidden state and attention from pipeline result. 
     The model_name should be a valid Huggingface transformer model. 
     Enable force_reinfer if one wants to ignore the existing npy file 
     and re-do the inference anyway.
     '''
-    all_hidden_states, all_attentions, avg_score = None, None, None
+    all_hidden_states, all_attentions, total_score, qa_pair_count = None, None, None, None
     # read from file
     if os.path.isfile(PARAM_PATH+'hidden_states.npy') and \
             os.path.isfile(PARAM_PATH+'attentions.npy') and \
@@ -100,7 +109,7 @@ def get_hstates_attens(model_name: str, force_reinfer=False):
             not force_reinfer:
         print("Loading parameters from file...")
         with open(PARAM_PATH+"score.npy", "rb") as score_file:
-            avg_score = np.load(score_file)
+            total_score, qa_pair_count = (i for i in np.load(score_file))
         with open(PARAM_PATH+"hidden_states.npy", "rb") as h_states_file:
             all_hidden_states = np.load(h_states_file)
         with open(PARAM_PATH+"attentions.npy", "rb") as attention_file:
@@ -109,22 +118,29 @@ def get_hstates_attens(model_name: str, force_reinfer=False):
     # extract parameters from model
     else:
         print("Extracting attentions from model...")
-        predictions = run_qa_pipeline(model_name)
+        predictions = run_qa_pipeline(model_name, filter_inputs=filter_inputs)
 
-        avg_score, all_hidden_states, all_attentions = \
-            predictions['score'], predictions['hidden_states'], predictions['attentions']
+        total_score, all_hidden_states, all_attentions, qa_pair_count = \
+            predictions['score'], predictions['hidden_states'], \
+            predictions['attentions'], predictions['qa_pair_len']
 
         with open(PARAM_PATH+"score.npy", "wb+") as scores_file:
-            np.save(scores_file, avg_score)
+            np.save(scores_file, np.array([total_score, qa_pair_count]))
         with open(PARAM_PATH+"hidden_states.npy", "wb+") as h_states_file:
             np.save(h_states_file, all_hidden_states)
         with open(PARAM_PATH+"attentions.npy", "wb+") as attention_file:
             np.save(attention_file, all_attentions)
 
-    print("average score: ", avg_score,
+    print("total score: ", total_score, "#QA pair: ", qa_pair_count,
           "hidden_state dim: ", all_hidden_states.shape,
           "attention dim:", all_attentions.shape)
-    return avg_score, all_hidden_states, all_attentions
+    
+    if layer_aggregration == 'mean':
+        total_score /= qa_pair_count
+        all_hidden_states /= qa_pair_count
+        all_attentions /= qa_pair_count
+    
+    return total_score, all_hidden_states, all_attentions
 
 
 def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None):
@@ -222,9 +238,9 @@ def plot_heatmap(data, sparsity_bar=0.025):
 
 
 if __name__ == '__main__':
-    _, h_states, attens = get_hstates_attens("csarron/roberta-base-squad-v1")
+    _, h_states, attens = get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False)
     # plot histogram for all layers and all heads
     plot_dist(attens, bin_step=0.0005, sparsity_bar=0.0005)
     # plot histogram for a certain head in a certain layer
     # plot_dist(attens, bin_step=200, sparsity_bar=0.0005, single_head_idx=(0, 0))
-    # plot_heatmap(attens, sparsity_bar=0.001)
+    plot_heatmap(attens, sparsity_bar=0.001)
