@@ -209,7 +209,7 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None):
         plt.clf()
 
 
-def plot_heatmap(data, sparsity_bar=0.025):
+def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False):
     '''
     Plot the heat map to visualize the relation between each subwords in the
     self attention of each attention head in each layer
@@ -224,7 +224,7 @@ def plot_heatmap(data, sparsity_bar=0.025):
             print("Plotting heatmap for layer {} head {}...".format(layer_idx, head_idx))
             sparsity = (head <= sparsity_bar).sum() / head.flatten().shape[0]
             ax = axs[int(head_idx/4), int(head_idx % 4)]
-            c = ax.pcolor(head)
+            c = ax.pcolor(head) if auto_scale else ax.pcolor(head, vmin=0.0, vmax=1.0)
             fig.colorbar(c, ax=ax)
             info = 'head_{}, max: {:.4f}, min: {:.4f}, spars: {:.4f}, sparsity_bar: {:.4f}'.format(
                 head_idx, np.amax(head), np.amin(head), sparsity, sparsity_bar)
@@ -233,14 +233,15 @@ def plot_heatmap(data, sparsity_bar=0.025):
         fig.suptitle(
             'Heatmap of Layer {}\'s Attention per head (batch aggregation=sum)'.format(layer_idx), fontsize=21, y=0.99)
         fig.tight_layout()
-        plt.savefig(RES_FIG_PATH+'heatmap_layer{}.png'.format(layer_idx), dpi=600)
+        fig_path = RES_FIG_PATH+"auto_scale_" if auto_scale else RES_FIG_PATH
+        plt.savefig(fig_path+'heatmap_layer{}.png'.format(layer_idx), dpi=600)
         plt.clf()
 
 
 if __name__ == '__main__':
-    _, h_states, attens = get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False)
+    _, h_states, attens = get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=True, force_reinfer=False)
     # plot histogram for all layers and all heads
-    plot_dist(attens, bin_step=0.0005, sparsity_bar=0.0005)
+    # plot_dist(attens, bin_step=0.0005, sparsity_bar=0.0005)
     # plot histogram for a certain head in a certain layer
     # plot_dist(attens, bin_step=200, sparsity_bar=0.0005, single_head_idx=(0, 0))
-    plot_heatmap(attens, sparsity_bar=0.001)
+    plot_heatmap(attens, sparsity_bar=0.001, auto_scale=True)

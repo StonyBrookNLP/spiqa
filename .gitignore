@@ -6,3 +6,9 @@
 *.pdf
 *.png
 *.jpg
+
+# compressed packages
+*.tar.gz
+*.7z
+*.zip
+*.tar.bz2
