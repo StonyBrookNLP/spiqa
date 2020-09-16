@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import argparse
 import os
 from subprocess import call
-from math import isnan
+from math import isnan, fsum
 from textwrap import wrap
 import urllib.request
 import json
@@ -47,7 +47,6 @@ def parse_squad_json(squad_ver='v2.0'):
 
     return data
 
-
 def run_qa_pipeline(model_name: str, filter_inputs=True):
     qa_pipeline = pipeline(
         "question-answering",
@@ -77,17 +76,34 @@ def run_qa_pipeline(model_name: str, filter_inputs=True):
     for qa_pair in fed_data:
         print("running pipeline iter {}/{}...".format(pipeline_running_counter, fed_data_len))
         prediction = qa_pipeline(qa_pair)
+
         if res is None:
             res = {'score': prediction['score'], 'hidden_states': prediction['hidden_states'],
-                   'attentions': prediction['attentions']}
+                'attentions': prediction['attentions']}
         else:
-            res['score'] = (res['score'] + prediction['score'])
-            res['hidden_states'] = np.sum(np.concatenate(
-                [prediction['hidden_states'], res['hidden_states']], axis=1), axis=1, keepdims=True)
-            res['attentions'] = np.sum(np.concatenate(
-                [prediction['attentions'], res['attentions']], axis=1), axis=1, keepdims=True)
+            peek_atten, peek_pred = res['attentions'][0][0][9][2][3], prediction['attentions'][0][0][9][2][3]
+            print("peek atten {}, curr atten {}".format(peek_atten, peek_pred))
+            print("sum by numpy: {}".format(np.sum([peek_atten, peek_pred])))
+            print("sum by fsum: {}".format(fsum([peek_atten, peek_pred])))
 
+            res['score'] = (res['score'] + prediction['score'])
+            # unfold the tensor to 2-D array to walk around buggy numpy sum
+            for layer_idx, (res_layer, pred_layer) in enumerate(zip(res['hidden_states'], prediction['hidden_states'])):
+                res['hidden_states'][layer_idx][0] = np.add(res_layer[0], pred_layer[0])
+            
+            for layer_idx, (res_layer, pred_layer) in enumerate(zip(res['attentions'], prediction['attentions'])):
+                for head_idx, (res_head, pred_head) in enumerate(zip(res_layer[0], pred_layer[0])):
+                    res['attentions'][layer_idx][0][head_idx] = np.add(res_head, pred_head)
+  
+        print("res in atten {}".format(res['attentions'][0][0][9][2][3]))
         pipeline_running_counter += 1
+
+        if ((res['attentions'] > pipeline_running_counter).any()): 
+            idx0, idx1, idx2, idx3, idx4 = np.where(res['attentions'] > pipeline_running_counter)
+            print("iter {} has attention larger than 1 ({}), exist..." \
+                .format(pipeline_running_counter, (idx0[0], idx1[0], idx2[0], idx3[0], idx4[0])))
+            exit()
+
         screen_clear()
 
     res['qa_pair_len'] = fed_data_len
@@ -103,16 +119,17 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
     '''
     all_hidden_states, all_attentions, total_score, qa_pair_count = None, None, None, None
     # read from file
-    if os.path.isfile(PARAM_PATH+'hidden_states.npy') and \
-            os.path.isfile(PARAM_PATH+'attentions.npy') and \
-            os.path.isfile(PARAM_PATH+'score.npy') and \
-            not force_reinfer:
+    input_type = "_filtered" if filter_inputs else "_all"
+    h_states_path, atten_path, score_path = \
+        (PARAM_PATH + i + input_type + '.npy' for i in ['hidden_states', 'attentions', 'score'])
+    if os.path.isfile(h_states_path) and os.path.isfile(atten_path) and \
+            os.path.isfile(score_path) and not force_reinfer:
         print("Loading parameters from file...")
-        with open(PARAM_PATH+"score.npy", "rb") as score_file:
+        with open(score_path, "rb") as score_file:
             total_score, qa_pair_count = (i for i in np.load(score_file))
-        with open(PARAM_PATH+"hidden_states.npy", "rb") as h_states_file:
+        with open(h_states_path, "rb") as h_states_file:
             all_hidden_states = np.load(h_states_file)
-        with open(PARAM_PATH+"attentions.npy", "rb") as attention_file:
+        with open(atten_path, "rb") as attention_file:
             all_attentions = np.load(attention_file)
 
     # extract parameters from model
@@ -124,11 +141,11 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
             predictions['score'], predictions['hidden_states'], \
             predictions['attentions'], predictions['qa_pair_len']
 
-        with open(PARAM_PATH+"score.npy", "wb+") as scores_file:
+        with open(score_path, "wb+") as scores_file:
             np.save(scores_file, np.array([total_score, qa_pair_count]))
-        with open(PARAM_PATH+"hidden_states.npy", "wb+") as h_states_file:
+        with open(h_states_path, "wb+") as h_states_file:
             np.save(h_states_file, all_hidden_states)
-        with open(PARAM_PATH+"attentions.npy", "wb+") as attention_file:
+        with open(atten_path, "wb+") as attention_file:
             np.save(attention_file, all_attentions)
 
     print("total score: ", total_score, "#QA pair: ", qa_pair_count,
@@ -136,9 +153,9 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
           "attention dim:", all_attentions.shape)
     
     if layer_aggregration == 'mean':
-        total_score /= qa_pair_count
-        all_hidden_states /= qa_pair_count
-        all_attentions /= qa_pair_count
+        total_score /= float(qa_pair_count)
+        all_hidden_states /= float(qa_pair_count)
+        all_attentions /= float(qa_pair_count)
     
     return total_score, all_hidden_states, all_attentions
 
@@ -239,9 +256,9 @@ def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False):
 
 
 if __name__ == '__main__':
-    _, h_states, attens = get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=True, force_reinfer=False)
+    _, h_states, attens = get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=True)
     # plot histogram for all layers and all heads
     # plot_dist(attens, bin_step=0.0005, sparsity_bar=0.0005)
     # plot histogram for a certain head in a certain layer
     # plot_dist(attens, bin_step=200, sparsity_bar=0.0005, single_head_idx=(0, 0))
-    plot_heatmap(attens, sparsity_bar=0.001, auto_scale=True)
+    # plot_heatmap(attens, sparsity_bar=0.001, auto_scale=True)
