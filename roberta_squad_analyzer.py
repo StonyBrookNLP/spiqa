@@ -21,8 +21,10 @@ RES_FIG_PATH = "./res_fig/"
 PARAM_PATH = "./params/"
 DATA_PATH = "./data/"
 
+
 def screen_clear():
-   _ = call('clear' if os.name =='posix' else 'cls')
+    _ = call('clear' if os.name == 'posix' else 'cls')
+
 
 def parse_squad_json(squad_ver='v1.1'):
     FILE_PATH = DATA_PATH+"dev-"+squad_ver+".json"
@@ -52,6 +54,7 @@ def parse_squad_json(squad_ver='v1.1'):
 
     return data
 
+
 def run_qa_pipeline(model_name: str, filter_inputs=True):
     qa_pipeline = pipeline(
         "question-answering",
@@ -70,9 +73,10 @@ def run_qa_pipeline(model_name: str, filter_inputs=True):
 
     associated_data = sum(associated_data, [])
     input_lens = [len(i['context']+i['question']) for i in associated_data]
+    print("QA string pair length: [{}, {}]".format(min(input_lens), max(input_lens)))
     # construct and apply length filter to inputs
     # TODO: parameterize the length selector
-    len_filter = [1 if 600 < i < 700 else 0 for i in input_lens]
+    len_filter = [1 if 600 <= i < 700 else 0 for i in input_lens]
     filtered_associated_data = list(compress(associated_data, len_filter))
     associated_data = random.sample(associated_data, 5000)
     fed_data = filtered_associated_data if filter_inputs else associated_data
@@ -94,17 +98,18 @@ def run_qa_pipeline(model_name: str, filter_inputs=True):
             # unfold the tensor to 2-D array to walk around buggy numpy sum
             for layer_idx, (res_layer, pred_layer) in enumerate(zip(res['hidden_states'], prediction['hidden_states'])):
                 res['hidden_states'][layer_idx][0] = np.add(res_layer[0], pred_layer[0])
-            
+
             for layer_idx, (res_layer, pred_layer) in enumerate(zip(res['attentions'], prediction['attentions'])):
                 for head_idx, (res_head, pred_head) in enumerate(zip(res_layer[0], pred_layer[0])):
                     res['attentions'][layer_idx][0][head_idx] = np.add(res_head, pred_head)
   
         pipeline_running_counter += 1
 
-        if ((res['attentions'] > pipeline_running_counter).any()): 
-            idx0, idx1, idx2, idx3, idx4 = np.where(res['attentions'] > pipeline_running_counter)
-            print("iter {} has attention larger than 1 ({}), exist..." \
-                .format(pipeline_running_counter, (idx0[0], idx1[0], idx2[0], idx3[0], idx4[0])))
+        if ((res['attentions'] > pipeline_running_counter).any()):
+            idx0, idx1, idx2, idx3, idx4 = np.where(
+                res['attentions'] > pipeline_running_counter)
+            print("iter {} has attention larger than 1 ({}), exist..."
+                  .format(pipeline_running_counter, (idx0[0], idx1[0], idx2[0], idx3[0], idx4[0])))
             exit()
 
         print(prediction['answer'], em_score, res['score'] / pipeline_running_counter)
@@ -126,7 +131,8 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
     # read from file
     input_type = "_filtered" if filter_inputs else "_all"
     h_states_path, atten_path, score_path = \
-        (PARAM_PATH + i + input_type + '.npy' for i in ['hidden_states', 'attentions', 'score'])
+        (PARAM_PATH + i + input_type +
+         '.npy' for i in ['hidden_states', 'attentions', 'score'])
     if os.path.isfile(h_states_path) and os.path.isfile(atten_path) and \
             os.path.isfile(score_path) and not force_reinfer:
         print("Loading parameters from file...")
@@ -156,16 +162,16 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
     print("total score: ", total_score, "#QA pair: ", qa_pair_count,
           "hidden_state dim: ", all_hidden_states.shape,
           "attention dim:", all_attentions.shape)
-    
+
     if layer_aggregration == 'mean':
         total_score /= float(qa_pair_count)
         all_hidden_states /= float(qa_pair_count)
         all_attentions /= float(qa_pair_count)
-    
+
     return total_score, all_hidden_states, all_attentions
 
 
-def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None):
+def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_aggregration='mean'):
     '''
     Plot the histrogram to visualize the distribution of the self attention 
     matrix for each attention head in each layer.
@@ -178,7 +184,7 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None):
         if type(bin_step) is int:
             return bin_step
         elif type(bin_step) is float:
-            return pd.Series(np.append(np.arange(0.0, np.amax(head_data), bin_step), np.amax(head_data)))
+            return pd.Series(np.append(np.arange(0.0, 1.0, bin_step), 1.0))
         else:
             return None
 
@@ -200,7 +206,16 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None):
                 head_idx_int = int(head_idx.split(',')[0].split('_')[1])
                 curr_ax = ax[int(head_idx_int/4), int(head_idx_int % 4)]
                 head.hist(ax=curr_ax, bins=get_bin_edges(bin_step, head),
-                          weights=(np.ones_like(head) / len(head)))
+                          weights=(np.ones_like(head) / len(head)), color='C0')
+                head.hist(ax=curr_ax, bins=get_bin_edges(bin_step, head),
+                          weights=(np.ones_like(head) / len(head)), cumulative=True,
+                          histtype='step', linewidth=1, color='C3')
+                # compute cdf and draw as line
+                # np_hist, np_bins = np.histogram(head, bins=get_bin_edges(bin_step, head))
+                # np_hist_cumulative = np.insert(np.cumsum(np.multiply(
+                #     np_hist, (np.ones_like(np_hist) / np.sum(np_hist)))), 0, 0.0)
+                # np_bins = np.insert(np.add(np_bins[:-1], bin_step/2.0), 0, 0.0)
+                # curr_ax.plot(np_bins, np_hist_cumulative, 'k--', color='C3', linewidth=1, solid_joinstyle='miter')
                 curr_ax.set_xlim([0.0, 0.03])
                 curr_ax.set_ylim([0.0, 1.0])
                 curr_ax.set_title('\n'.join(wrap(head_idx, 38)))
@@ -208,10 +223,11 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None):
             for axis in ax.flatten():
                 axis.grid(linestyle='--', color='grey', alpha=0.6)
             fig.suptitle(
-                'Histogram of Layer {}\'s Attention per head (batch aggregation=sum)'.format(layer_idx), fontsize=21, y=0.99)
+                'Histogram of Layer {}\'s Attention per head (batch aggregation={})'.format(layer_idx, layer_aggregration), fontsize=21, y=0.99)
             fig.tight_layout()
             plt.savefig(RES_FIG_PATH+'hist_layer{}.png'.format(layer_idx), dpi=600)
             plt.clf()
+            plt.close(fig)
     elif type(single_head_idx) is tuple and len(single_head_idx) == 2:
         layer_idx, head_idx = single_head_idx
         head = data[layer_idx][0][head_idx].flatten()
@@ -219,7 +235,15 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None):
         head = pd.Series(head)
         fig, ax = plt.subplots(figsize=(20, 6))
         head.hist(ax=ax, bins=get_bin_edges(bin_step, head),
-                  weights=(np.ones_like(head) / len(head)))
+                  weights=(np.ones_like(head) / len(head)), color='C0')
+        # compute cdf and draw as line
+        # np_hist, np_bins = np.histogram(head, bins=get_bin_edges(bin_step, head))
+        # np_hist_cumulative = np.insert(np.cumsum(np.multiply(np_hist, (np.ones_like(np_hist) / np.sum(np_hist)))), 0, 0.0)
+        # np_bins = np.insert(np.add(np_bins[:-1], bin_step/2.0), 0, 0.0)
+        # ax.plot(np_bins, np_hist_cumulative, 'k--', color='C3', linewidth=1)
+        head.hist(ax=ax, bins=get_bin_edges(bin_step, head),
+                  weights=(np.ones_like(head) / len(head)), cumulative=True,
+                  histtype='step', linewidth=1, color='C3')
         ax.set_title('layer_{}_head_{}, max: {:.4f}, min: {:.4f}, spars: {:.4f}, sparsity_bar: {:.4f}'
                      .format(layer_idx, head_idx, np.amax(head), np.amin(head), sparsity, sparsity_bar))
         ax.set_xlim([0.0, 1.0])
@@ -229,9 +253,10 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None):
         plt.savefig(
             RES_FIG_PATH+'hist_singlehead_layer{}_head{}.png'.format(layer_idx, head_idx), dpi=600)
         plt.clf()
+        plt.close(fig)
 
 
-def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True):
+def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True, layer_aggregration='mean'):
     '''
     Plot the heat map to visualize the relation between each subwords in the
     self attention of each attention head in each layer
@@ -244,30 +269,41 @@ def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True):
     '''
     for layer_idx, layer in enumerate(data):
         fig, axs = plt.subplots(3, 4, figsize=(19, 12))
+        print("Plotting heatmap for layer {}...".format(layer_idx))
         for head_idx, head in enumerate(layer[0]):
-            print("Plotting heatmap for layer {} head {}...".format(layer_idx, head_idx))
             sparsity = (head <= sparsity_bar).sum() / head.flatten().shape[0]
             info = 'head_{}, max: {:.4f}, min: {:.4f}, spars: {:.4f}, sparsity_bar: {:.4f}'.format(
                 head_idx, np.amax(head), np.amin(head), sparsity, sparsity_bar)
-            if binarize: head = np.array((head > sparsity_bar)).astype("float")
+            if binarize:
+                head = np.array((head > sparsity_bar)).astype("float")
             ax = axs[int(head_idx/4), int(head_idx % 4)]
-            c = ax.pcolormesh(head) if auto_scale else ax.pcolormesh(head, vmin=0.0, vmax=1.0)
+            ax.invert_yaxis()
+            ax.xaxis.tick_top()
+            c = ax.pcolormesh(head) if auto_scale else ax.pcolormesh(
+                head, vmin=0.0, vmax=1.0)
             fig.colorbar(c, ax=ax)
-            ax.set_title('\n'.join(wrap(info, 34)))
+            ax.set_title('\n'.join(wrap(info, 35)))
 
-        fig.suptitle(
-            'Heatmap of Layer {}\'s Attention per head (batch aggregation=sum)'.format(layer_idx), fontsize=21, y=0.99)
+        fig.suptitle('Heatmap of Layer {}\'s Attention per head (batch aggregation={})'
+                     .format(layer_idx, layer_aggregration), fontsize=21, y=0.99)
         fig.tight_layout()
         fig_path = RES_FIG_PATH+"auto_scale_" if auto_scale else RES_FIG_PATH
         fig_path = fig_path+"bin_" if binarize else fig_path
         plt.savefig(fig_path+'heatmap_layer{}.png'.format(layer_idx), dpi=600)
         plt.clf()
+        plt.close(fig)
 
 
 if __name__ == '__main__':
     _, h_states, attens = get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=True, force_reinfer=True)
     # plot histogram for all layers and all heads
     # plot_dist(attens, bin_step=0.0005, sparsity_bar=0.0005)
-    # plot histogram for a certain head in a certain layer
+    # # plot histogram for a certain head in a certain layer
     # plot_dist(attens, bin_step=200, sparsity_bar=0.0005, single_head_idx=(0, 0))
-    # plot_heatmap(attens, sparsity_bar=0.001, auto_scale=True)
+    # plot_dist(attens, bin_step=200, sparsity_bar=0.0005, single_head_idx=(11, 0))
+    # plot_dist(attens, bin_step=200, sparsity_bar=0.0005, single_head_idx=(0, 3))
+    # plot_dist(attens, bin_step=200, sparsity_bar=0.0005, single_head_idx=(11, 5))
+    # # plot heatmaps
+    # plot_heatmap(attens, sparsity_bar=0.0005, binarize=False)
+    plot_heatmap(attens, sparsity_bar=0.005, binarize=True)
+    # plot_heatmap(attens, sparsity_bar=0.0005, binarize=False, auto_scale=True)
