@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 
 import argparse
 import os
+import random
 from subprocess import call
 from math import isnan, fsum
 from textwrap import wrap
@@ -22,7 +23,7 @@ DATA_PATH = "./data/"
 def screen_clear():
    _ = call('clear' if os.name =='posix' else 'cls')
 
-def parse_squad_json(squad_ver='v2.0'):
+def parse_squad_json(squad_ver='v1.1'):
     FILE_PATH = DATA_PATH+"dev-"+squad_ver+".json"
     if not os.path.isfile(FILE_PATH):
         # download json file from web
@@ -41,7 +42,7 @@ def parse_squad_json(squad_ver='v2.0'):
             for pgraph in topic["paragraphs"]:
                 ques_per_paragraph = []
                 for qa in pgraph["qas"]:
-                    if not qa["is_impossible"]:
+                    if (squad_ver == 'v1.1') or (squad_ver=="v2.0" and not qa["is_impossible"]):
                         ques_per_paragraph.append(qa["question"])
                 data[pgraph["context"]] = ques_per_paragraph
 
@@ -82,9 +83,6 @@ def run_qa_pipeline(model_name: str, filter_inputs=True):
                 'attentions': prediction['attentions']}
         else:
             peek_atten, peek_pred = res['attentions'][0][0][9][2][3], prediction['attentions'][0][0][9][2][3]
-            print("peek atten {}, curr atten {}".format(peek_atten, peek_pred))
-            print("sum by numpy: {}".format(np.sum([peek_atten, peek_pred])))
-            print("sum by fsum: {}".format(fsum([peek_atten, peek_pred])))
 
             res['score'] = (res['score'] + prediction['score'])
             # unfold the tensor to 2-D array to walk around buggy numpy sum
@@ -95,7 +93,6 @@ def run_qa_pipeline(model_name: str, filter_inputs=True):
                 for head_idx, (res_head, pred_head) in enumerate(zip(res_layer[0], pred_layer[0])):
                     res['attentions'][layer_idx][0][head_idx] = np.add(res_head, pred_head)
   
-        print("res in atten {}".format(res['attentions'][0][0][9][2][3]))
         pipeline_running_counter += 1
 
         if ((res['attentions'] > pipeline_running_counter).any()): 
@@ -104,7 +101,10 @@ def run_qa_pipeline(model_name: str, filter_inputs=True):
                 .format(pipeline_running_counter, (idx0[0], idx1[0], idx2[0], idx3[0], idx4[0])))
             exit()
 
-        screen_clear()
+        if (prediction['score'] < 0.7):
+            print("found abnormal score {} on {}".format(prediction['score'], qa_pair))
+
+        # screen_clear()
 
     res['qa_pair_len'] = fed_data_len
     return res
@@ -260,7 +260,7 @@ def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True):
 
 
 if __name__ == '__main__':
-    _, h_states, attens = get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=True)
+    _, h_states, attens = get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=True)
     # plot histogram for all layers and all heads
     # plot_dist(attens, bin_step=0.0005, sparsity_bar=0.0005)
     # plot histogram for a certain head in a certain layer
