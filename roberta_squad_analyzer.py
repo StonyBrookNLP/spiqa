@@ -23,7 +23,7 @@ DATA_PATH = "./data/"
 
 
 def screen_clear():
-    _ = call('clear' if os.name == 'posix' else 'cls')
+    _ = call('clear' if os.name == 'posix' else 'cls', shell=True)
 
 
 def parse_squad_json(squad_ver='v1.1'):
@@ -55,7 +55,7 @@ def parse_squad_json(squad_ver='v1.1'):
     return data
 
 
-def run_qa_pipeline(model_name: str, filter_inputs=True):
+def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True):
     qa_pipeline = pipeline(
         "question-answering",
         model=model_name,
@@ -79,7 +79,9 @@ def run_qa_pipeline(model_name: str, filter_inputs=True):
     len_filter = [1 if 600 <= i < 700 else 0 for i in input_lens]
     filtered_associated_data = list(compress(associated_data, len_filter))
     associated_data = random.sample(associated_data, 5000)
+    single_associated_data = [random.choice(associated_data)]
     fed_data = filtered_associated_data if filter_inputs else associated_data
+    fed_data = single_associated_data if single_input else fed_data
 
     res, pipeline_running_counter, fed_data_len = None, 0, len(fed_data)
     print("Among all inputs {}/{} are selected.".format(fed_data_len, len(associated_data)))
@@ -120,7 +122,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True):
     return res
 
 
-def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True, layer_aggregration='mean'):
+def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True, single_input=True, layer_aggregration='mean'):
     '''
     get the hidden state and attention from pipeline result. 
     The model_name should be a valid Huggingface transformer model. 
@@ -146,7 +148,7 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
     # extract parameters from model
     else:
         print("Extracting attentions from model...")
-        predictions = run_qa_pipeline(model_name, filter_inputs=filter_inputs)
+        predictions = run_qa_pipeline(model_name, filter_inputs=filter_inputs, single_input=single_input)
 
         total_score, all_hidden_states, all_attentions, qa_pair_count = \
             predictions['score'], predictions['hidden_states'], \
@@ -305,5 +307,5 @@ if __name__ == '__main__':
     # plot_dist(attens, bin_step=200, sparsity_bar=0.0005, single_head_idx=(11, 5))
     # # plot heatmaps
     # plot_heatmap(attens, sparsity_bar=0.0005, binarize=False)
-    plot_heatmap(attens, sparsity_bar=0.005, binarize=True)
+    # plot_heatmap(attens, sparsity_bar=0.0005, binarize=True)
     # plot_heatmap(attens, sparsity_bar=0.0005, binarize=False, auto_scale=True)
