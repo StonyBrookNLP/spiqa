@@ -297,7 +297,7 @@ def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True, laye
 
 
 if __name__ == '__main__':
-    _, h_states, attens = get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=True, force_reinfer=True)
+    _, h_states, attens = get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=True, single_input=False)
     # plot histogram for all layers and all heads
     # plot_dist(attens, bin_step=0.0005, sparsity_bar=0.0005)
     # # plot histogram for a certain head in a certain layer
