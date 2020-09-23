@@ -78,7 +78,6 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True):
     # TODO: parameterize the length selector
     len_filter = [1 if 600 <= i < 700 else 0 for i in input_lens]
     filtered_associated_data = list(compress(associated_data, len_filter))
-    associated_data = random.sample(associated_data, 5000)
     single_associated_data = [random.choice(associated_data)]
     fed_data = filtered_associated_data if filter_inputs else associated_data
     fed_data = single_associated_data if single_input else fed_data
@@ -116,7 +115,13 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True):
 
         print(prediction['answer'], em_score, res['score'] / pipeline_running_counter)
 
-        screen_clear()
+        # check sparsity filter apply
+        sampled_data = prediction['attentions'] * (prediction['attentions'] <= 0.005)
+        if (sampled_data > 0.0).any(): 
+            print("sparsity check failed!")
+            exit()
+
+        # screen_clear()
 
     res['qa_pair_len'] = fed_data_len
     return res
@@ -173,7 +178,7 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
     return total_score, all_hidden_states, all_attentions
 
 
-def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_aggregration='mean'):
+def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_aggregration='mean', attached_title=''):
     '''
     Plot the histrogram to visualize the distribution of the self attention 
     matrix for each attention head in each layer.
@@ -182,11 +187,13 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
     layers: layer_<0-11>
     sparsity_bar: threshold for sparsity calculation
     '''
-    def get_bin_edges(bin_step, head_data):
+    def get_bin_edges(bin_step, head_idx):
         if type(bin_step) is int:
             return bin_step
         elif type(bin_step) is float:
             return pd.Series(np.append(np.arange(0.0, 1.0, bin_step), 1.0))
+        elif type(bin_step) is list:
+            return pd.Series(np.append(np.arange(0.0, 1.0, bin_step[head_idx]), 1.0))
         else:
             return None
 
@@ -207,9 +214,9 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
             for head_idx, head in atten_layers_pd.iteritems():
                 head_idx_int = int(head_idx.split(',')[0].split('_')[1])
                 curr_ax = ax[int(head_idx_int/4), int(head_idx_int % 4)]
-                head.hist(ax=curr_ax, bins=get_bin_edges(bin_step, head),
+                head.hist(ax=curr_ax, bins=get_bin_edges(bin_step, head_idx),
                           weights=(np.ones_like(head) / len(head)), color='C0')
-                head.hist(ax=curr_ax, bins=get_bin_edges(bin_step, head),
+                head.hist(ax=curr_ax, bins=get_bin_edges(bin_step, head_idx),
                           weights=(np.ones_like(head) / len(head)), cumulative=True,
                           histtype='step', linewidth=1, color='C3')
                 # compute cdf and draw as line
@@ -225,7 +232,8 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
             for axis in ax.flatten():
                 axis.grid(linestyle='--', color='grey', alpha=0.6)
             fig.suptitle(
-                'Histogram of Layer {}\'s Attention per head (batch aggregation={})'.format(layer_idx, layer_aggregration), fontsize=21, y=0.99)
+                'Histogram of Layer {}\'s Attention per head (batch aggregation={}, {})' \
+                    .format(layer_idx, layer_aggregration, attached_title), fontsize=21, y=0.99)
             fig.tight_layout()
             plt.savefig(RES_FIG_PATH+'hist_layer{}.png'.format(layer_idx), dpi=600)
             plt.clf()
