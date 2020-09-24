@@ -12,3 +12,9 @@
 *.7z
 *.zip
 *.tar.bz2
+
+# ignore result figs
+*fig_res/
+
+# ignore params
+attention_params

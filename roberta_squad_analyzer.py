@@ -15,11 +15,12 @@ from math import isnan, fsum
 from textwrap import wrap
 import urllib.request
 import json
-from itertools import compress
+from itertools import compress, product
 
 RES_FIG_PATH = "./res_fig/"
 PARAM_PATH = "./params/"
 DATA_PATH = "./data/"
+FILT_PARAM_PATH = "./filtered_params/"
 
 
 def screen_clear():
@@ -45,10 +46,13 @@ def parse_squad_json(squad_ver='v1.1'):
             for pgraph in topic["paragraphs"]:
                 ques_per_paragraph = []
                 for qa in pgraph["qas"]:
-                    if (squad_ver == 'v1.1') or (squad_ver=="v2.0" and not qa["is_impossible"]):
-                        gold_ans = [answer['text'] for answer in qa['answers'] if normalize_answer(answer['text'])]
-                        if not gold_ans: gold_ans = [""]
-                        ques_per_paragraph.append({"question":qa["question"], "answers":gold_ans})
+                    if (squad_ver == 'v1.1') or (squad_ver == "v2.0" and not qa["is_impossible"]):
+                        gold_ans = [answer['text'] for answer in qa['answers']
+                                    if normalize_answer(answer['text'])]
+                        if not gold_ans:
+                            gold_ans = [""]
+                        ques_per_paragraph.append(
+                            {"question": qa["question"], "answers": gold_ans})
 
                 data[pgraph["context"]] = ques_per_paragraph
 
@@ -59,7 +63,8 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True):
     qa_pipeline = pipeline(
         "question-answering",
         model=model_name,
-        tokenizer=model_name
+        tokenizer=model_name,
+        device=0
     )
 
     print("Running pipeline...")
@@ -68,7 +73,8 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True):
     for context in data.keys():
         context_ques_pair = []
         for ques in data[context]:
-            context_ques_pair.append({'context': context, 'question': ques['question'], 'answers': ques['answers']})
+            context_ques_pair.append(
+                {'context': context, 'question': ques['question'], 'answers': ques['answers']})
         associated_data.append(context_ques_pair)
 
     associated_data = sum(associated_data, [])
@@ -87,13 +93,15 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True):
     # run the prediction
     for qa_pair in fed_data:
         print("running pipeline iter {}/{}...".format(pipeline_running_counter, fed_data_len))
-        prediction = qa_pipeline({'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=320)
-        em_score = max(compute_exact(prediction['answer'], gold_ans) for gold_ans in qa_pair['answers'])
+        prediction = qa_pipeline(
+            {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=320)
+        em_score = max(compute_exact(prediction['answer'], gold_ans)
+                       for gold_ans in qa_pair['answers'])
 
         # aggregrate attention and hidden states
         if res is None:
             res = {'score': em_score, 'hidden_states': prediction['hidden_states'],
-                'attentions': prediction['attentions']}
+                   'attentions': prediction['attentions']}
         else:
             res['score'] = (res['score'] + em_score)
             # unfold the tensor to 2-D array to walk around buggy numpy sum
@@ -102,8 +110,9 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True):
 
             for layer_idx, (res_layer, pred_layer) in enumerate(zip(res['attentions'], prediction['attentions'])):
                 for head_idx, (res_head, pred_head) in enumerate(zip(res_layer[0], pred_layer[0])):
-                    res['attentions'][layer_idx][0][head_idx] = np.add(res_head, pred_head)
-  
+                    res['attentions'][layer_idx][0][head_idx] = np.add(
+                        res_head, pred_head)
+
         pipeline_running_counter += 1
 
         if ((res['attentions'] > pipeline_running_counter).any()):
@@ -117,7 +126,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True):
 
         # check sparsity filter apply
         sampled_data = prediction['attentions'] * (prediction['attentions'] <= 0.005)
-        if (sampled_data > 0.0).any(): 
+        if (sampled_data > 0.0).any():
             print("sparsity check failed!")
             exit()
 
@@ -153,7 +162,8 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
     # extract parameters from model
     else:
         print("Extracting attentions from model...")
-        predictions = run_qa_pipeline(model_name, filter_inputs=filter_inputs, single_input=single_input)
+        predictions = run_qa_pipeline(
+            model_name, filter_inputs=filter_inputs, single_input=single_input)
 
         total_score, all_hidden_states, all_attentions, qa_pair_count = \
             predictions['score'], predictions['hidden_states'], \
@@ -178,6 +188,44 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
     return total_score, all_hidden_states, all_attentions
 
 
+def get_sparsities(threshold_list: list, sparsity_bar=0.025, layer_aggregration='mean'):
+    '''
+    extract sparsities for a fixed sparsity bar from all parameters with different threshold.
+    '''
+    params_path_list = [FILT_PARAM_PATH +
+                        i.replace('.', '_') + "/" for i in threshold_list]
+    sparsity_table = pd.DataFrame(index=[i for i in threshold_list])
+
+    for threshold, params in zip(threshold_list, params_path_list):
+        all_hidden_states, all_attentions, total_score, qa_pair_count = None, None, None, None
+        # read from file
+        input_type = "_all"
+        h_states_path, atten_path, score_path = \
+            (params + i + input_type +
+             '.npy' for i in ['hidden_states', 'attentions', 'score'])
+        if os.path.isfile(h_states_path) and os.path.isfile(atten_path) and \
+                os.path.isfile(score_path):
+            with open(score_path, "rb") as score_file:
+                total_score, qa_pair_count = (i for i in np.load(score_file))
+            with open(h_states_path, "rb") as h_states_file:
+                all_hidden_states = np.load(h_states_file)
+            with open(atten_path, "rb") as attention_file:
+                all_attentions = np.load(attention_file)
+
+        if layer_aggregration == 'mean':
+            total_score /= float(qa_pair_count)
+            all_hidden_states /= float(qa_pair_count)
+            all_attentions /= float(qa_pair_count)
+
+        for layer_idx, layer in enumerate(all_attentions):
+            for head_idx, head in enumerate(layer[0]):
+                sparsity = (head <= sparsity_bar).sum() / head.flatten().shape[0]
+                sparsity_table.at[threshold, 'layer_{}_head_{}'.format(
+                    layer_idx, head_idx)] = sparsity
+
+    return sparsity_table
+
+
 def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_aggregration='mean', attached_title=''):
     '''
     Plot the histrogram to visualize the distribution of the self attention 
@@ -187,13 +235,13 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
     layers: layer_<0-11>
     sparsity_bar: threshold for sparsity calculation
     '''
-    def get_bin_edges(bin_step, head_idx):
+    def get_bin_edges(bin_step, head_idx, layer_idx):
         if type(bin_step) is int:
             return bin_step
         elif type(bin_step) is float:
             return pd.Series(np.append(np.arange(0.0, 1.0, bin_step), 1.0))
         elif type(bin_step) is list:
-            return pd.Series(np.append(np.arange(0.0, 1.0, bin_step[head_idx]), 1.0))
+            return pd.Series(np.append(np.arange(0.0, 1.0, bin_step[layer_idx][head_idx]), 1.0))
         else:
             return None
 
@@ -214,17 +262,11 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
             for head_idx, head in atten_layers_pd.iteritems():
                 head_idx_int = int(head_idx.split(',')[0].split('_')[1])
                 curr_ax = ax[int(head_idx_int/4), int(head_idx_int % 4)]
-                head.hist(ax=curr_ax, bins=get_bin_edges(bin_step, head_idx),
+                head.hist(ax=curr_ax, bins=get_bin_edges(bin_step, layer_idx, head_idx),
                           weights=(np.ones_like(head) / len(head)), color='C0')
-                head.hist(ax=curr_ax, bins=get_bin_edges(bin_step, head_idx),
+                head.hist(ax=curr_ax, bins=get_bin_edges(bin_step, layer_idx, head_idx),
                           weights=(np.ones_like(head) / len(head)), cumulative=True,
                           histtype='step', linewidth=1, color='C3')
-                # compute cdf and draw as line
-                # np_hist, np_bins = np.histogram(head, bins=get_bin_edges(bin_step, head))
-                # np_hist_cumulative = np.insert(np.cumsum(np.multiply(
-                #     np_hist, (np.ones_like(np_hist) / np.sum(np_hist)))), 0, 0.0)
-                # np_bins = np.insert(np.add(np_bins[:-1], bin_step/2.0), 0, 0.0)
-                # curr_ax.plot(np_bins, np_hist_cumulative, 'k--', color='C3', linewidth=1, solid_joinstyle='miter')
                 curr_ax.set_xlim([0.0, 0.03])
                 curr_ax.set_ylim([0.0, 1.0])
                 curr_ax.set_title('\n'.join(wrap(head_idx, 38)))
@@ -232,8 +274,8 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
             for axis in ax.flatten():
                 axis.grid(linestyle='--', color='grey', alpha=0.6)
             fig.suptitle(
-                'Histogram of Layer {}\'s Attention per head (batch aggregation={}, {})' \
-                    .format(layer_idx, layer_aggregration, attached_title), fontsize=21, y=0.99)
+                'Histogram of Layer {}\'s Attention per head (batch aggregation={}, {})'
+                .format(layer_idx, layer_aggregration, attached_title), fontsize=21, y=0.99)
             fig.tight_layout()
             plt.savefig(RES_FIG_PATH+'hist_layer{}.png'.format(layer_idx), dpi=600)
             plt.clf()
@@ -244,14 +286,14 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
         sparsity = (head <= (sparsity_bar)).sum() / head.shape[0]
         head = pd.Series(head)
         fig, ax = plt.subplots(figsize=(20, 6))
-        head.hist(ax=ax, bins=get_bin_edges(bin_step, head),
+        head.hist(ax=ax, bins=get_bin_edges(bin_step, layer_idx, head_idx),
                   weights=(np.ones_like(head) / len(head)), color='C0')
         # compute cdf and draw as line
         # np_hist, np_bins = np.histogram(head, bins=get_bin_edges(bin_step, head))
         # np_hist_cumulative = np.insert(np.cumsum(np.multiply(np_hist, (np.ones_like(np_hist) / np.sum(np_hist)))), 0, 0.0)
         # np_bins = np.insert(np.add(np_bins[:-1], bin_step/2.0), 0, 0.0)
         # ax.plot(np_bins, np_hist_cumulative, 'k--', color='C3', linewidth=1)
-        head.hist(ax=ax, bins=get_bin_edges(bin_step, head),
+        head.hist(ax=ax, bins=get_bin_edges(bin_step, layer_idx, head_idx),
                   weights=(np.ones_like(head) / len(head)), cumulative=True,
                   histtype='step', linewidth=1, color='C3')
         ax.set_title('layer_{}_head_{}, max: {:.4f}, min: {:.4f}, spars: {:.4f}, sparsity_bar: {:.4f}'
@@ -266,7 +308,7 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
         plt.close(fig)
 
 
-def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True, layer_aggregration='mean'):
+def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True, layer_aggregration='mean', attached_title=''):
     '''
     Plot the heat map to visualize the relation between each subwords in the
     self attention of each attention head in each layer
@@ -294,8 +336,8 @@ def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True, laye
             fig.colorbar(c, ax=ax)
             ax.set_title('\n'.join(wrap(info, 35)))
 
-        fig.suptitle('Heatmap of Layer {}\'s Attention per head (batch aggregation={})'
-                     .format(layer_idx, layer_aggregration), fontsize=21, y=0.99)
+        fig.suptitle('Heatmap of Layer {}\'s Attention per head (batch aggregation={}, {})'
+                     .format(layer_idx, layer_aggregration, attached_title), fontsize=21, y=0.99)
         fig.tight_layout()
         fig_path = RES_FIG_PATH+"auto_scale_" if auto_scale else RES_FIG_PATH
         fig_path = fig_path+"bin_" if binarize else fig_path
@@ -304,16 +346,50 @@ def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True, laye
         plt.close(fig)
 
 
+def plot_sparsity_change(data, sparsity_bar=0.025):
+    spars_threshold = [float(i) for i in data.index.tolist()]
+    for layer_idx in range(0, 12):
+        print('plotting curve for sparsities...')
+        fig, ax = plt.subplots(3, 4, figsize=(21, 12))
+        for head_idx in range(0, 12):
+            curr_ax = ax[int(head_idx/4), int(head_idx % 4)]
+            curr_ax.plot(spars_threshold, data['layer_{}_head_{}'.format(
+                layer_idx, head_idx)].tolist(), color='C0', marker='s')
+            curr_ax.set_title('head {}'.format(head_idx))
+            curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
+            curr_ax.set_ylim([0.0, 1.01])
+            curr_ax.set_xlim(0.0, max(spars_threshold)+0.01)
+
+        fig.suptitle('Sparsity for Different Thresholds with Fixed Bar for Layer {}'.format(
+            layer_idx), fontsize=21, y=0.99)
+        fig.tight_layout()
+        plt.savefig(RES_FIG_PATH+'spars_change_layer{}.png'.format(layer_idx), dpi=600)
+        plt.clf()
+        plt.close(fig)
+
+
 if __name__ == '__main__':
-    _, h_states, attens = get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=True, single_input=False)
-    # plot histogram for all layers and all heads
-    # plot_dist(attens, bin_step=0.0005, sparsity_bar=0.0005)
+    em_score, h_states, attens = get_hstates_attens(
+        "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=True, single_input=False)
+    em_str = 'EM={:.2f}'.format(em_score*100)
+    # # plot histogram for all layers and all heads
+    # plot_dist(attens, bin_step=0.0005, sparsity_bar=0.0005, attached_title=em_str)
     # # plot histogram for a certain head in a certain layer
-    # plot_dist(attens, bin_step=200, sparsity_bar=0.0005, single_head_idx=(0, 0))
-    # plot_dist(attens, bin_step=200, sparsity_bar=0.0005, single_head_idx=(11, 0))
-    # plot_dist(attens, bin_step=200, sparsity_bar=0.0005, single_head_idx=(0, 3))
-    # plot_dist(attens, bin_step=200, sparsity_bar=0.0005, single_head_idx=(11, 5))
+    # plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
+    #           single_head_idx=(0, 0), attached_title=em_str)
+    # plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
+    #           single_head_idx=(0, 9), attached_title=em_str)
+    # plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
+    #           single_head_idx=(0, 11), attached_title=em_str)
+
     # # plot heatmaps
-    # plot_heatmap(attens, sparsity_bar=0.0005, binarize=False)
-    # plot_heatmap(attens, sparsity_bar=0.0005, binarize=True)
-    # plot_heatmap(attens, sparsity_bar=0.0005, binarize=False, auto_scale=True)
+    # plot_heatmap(attens, sparsity_bar=0.0005, binarize=False, attached_title=em_str)
+    # plot_heatmap(attens, sparsity_bar=0.0005, binarize=True, attached_title=em_str)
+    # plot_heatmap(attens, sparsity_bar=0.0005, binarize=False,
+    #              auto_scale=True, attached_title=em_str)
+    # # compute sparsity
+    # spars_threshold = ['0.0', '0.0005', '0.001', '0.005', '0.01', '0.05', '0.1']
+    # spars = get_sparsities(spars_threshold, sparsity_bar=0.0005)
+    # #print average sparsity change
+    # print(spars.mean(axis=1))
+    # plot_sparsity_change(spars, sparsity_bar=0.0005)
