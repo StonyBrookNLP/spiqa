@@ -11,10 +11,10 @@ BERT-like NLP models and visualizing the sparsity of the multi-head attention.
 | ------------------------------- | -------------- |
 | #layers of multi-head attention | 12             |
 | #heads per layer                | 12             |
-| max length of tokens            | 384            |
-| attention dim                   | 384x384        |
+| max length of tokens            | 320            |
+| attention dim                   | 320x320        |
 | context+question size           | 600~700        |
-| Dataset                         | squad-dev-v2.0 |
+| Dataset                         | squad-dev-v1.1 |
 
 ### Observation
 

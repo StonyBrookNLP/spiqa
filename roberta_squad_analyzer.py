@@ -85,6 +85,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True):
     len_filter = [1 if 600 <= i < 700 else 0 for i in input_lens]
     filtered_associated_data = list(compress(associated_data, len_filter))
     single_associated_data = [random.choice(associated_data)]
+    associated_data = random.sample(associated_data, 3)
     fed_data = filtered_associated_data if filter_inputs else associated_data
     fed_data = single_associated_data if single_input else fed_data
 
@@ -97,13 +98,19 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True):
             {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=320)
         em_score = max(compute_exact(prediction['answer'], gold_ans)
                        for gold_ans in qa_pair['answers'])
+        att_array = prediction['attentions']
 
         # aggregrate attention and hidden states
         if res is None:
-            res = {'score': em_score, 'hidden_states': prediction['hidden_states'],
-                   'attentions': prediction['attentions']}
+            res = {'score': em_score, 'hidden_states': prediction['hidden_states'], 'attentions': att_array, 
+                   'max': np.amax(att_array.reshape(*att_array.shape[:3], -1), axis=-1), 
+                   'min': np.amin(att_array.reshape(*att_array.shape[:3], -1), axis=-1), 
+                   'std': np.std(att_array.reshape(*att_array.shape[:3], -1), axis=-1)}
         else:
             res['score'] = (res['score'] + em_score)
+            res['max'] = np.fmax(res['max'], np.amax(att_array.reshape(*att_array.shape[:3], -1), axis=-1))
+            res['min'] = np.fmin(res['min'], np.amin(att_array.reshape(*att_array.shape[:3], -1), axis=-1))
+            res['std'] = np.concatenate((res['std'], np.std(att_array.reshape(*att_array.shape[:3], -1), axis=-1)), axis=1)
             # unfold the tensor to 2-D array to walk around buggy numpy sum
             for layer_idx, (res_layer, pred_layer) in enumerate(zip(res['hidden_states'], prediction['hidden_states'])):
                 res['hidden_states'][layer_idx][0] = np.add(res_layer[0], pred_layer[0])
@@ -143,14 +150,15 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
     Enable force_reinfer if one wants to ignore the existing npy file 
     and re-do the inference anyway.
     '''
-    all_hidden_states, all_attentions, total_score, qa_pair_count = None, None, None, None
+    all_hidden_states, all_attentions, total_score, qa_pair_count, all_max, all_min, all_std = \
+        None, None, None, None, None, None, None
     # read from file
     input_type = "_filtered" if filter_inputs else "_all"
-    h_states_path, atten_path, score_path = \
+    h_states_path, atten_path, score_path, att_stat_path = \
         (PARAM_PATH + i + input_type +
-         '.npy' for i in ['hidden_states', 'attentions', 'score'])
+         '.npy' for i in ['hidden_states', 'attentions', 'score', 'att_stat_features'])
     if os.path.isfile(h_states_path) and os.path.isfile(atten_path) and \
-            os.path.isfile(score_path) and not force_reinfer:
+            os.path.isfile(score_path) and os.path.isfile(att_stat_path) and not force_reinfer:
         print("Loading parameters from file...")
         with open(score_path, "rb") as score_file:
             total_score, qa_pair_count = (i for i in np.load(score_file))
@@ -158,6 +166,10 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
             all_hidden_states = np.load(h_states_file)
         with open(atten_path, "rb") as attention_file:
             all_attentions = np.load(attention_file)
+        with open(att_stat_path, "rb") as att_stat_file:
+            all_max = np.load(att_stat_file)
+            all_min = np.load(att_stat_file)
+            all_std = np.load(att_stat_file)
 
     # extract parameters from model
     else:
@@ -165,9 +177,10 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
         predictions = run_qa_pipeline(
             model_name, filter_inputs=filter_inputs, single_input=single_input)
 
-        total_score, all_hidden_states, all_attentions, qa_pair_count = \
+        total_score, all_hidden_states, all_attentions, qa_pair_count, all_max, all_min, all_std = \
             predictions['score'], predictions['hidden_states'], \
-            predictions['attentions'], predictions['qa_pair_len']
+            predictions['attentions'], predictions['qa_pair_len'], \
+            predictions['max'], predictions['min'], predictions['std']
 
         with open(score_path, "wb+") as scores_file:
             np.save(scores_file, np.array([total_score, qa_pair_count]))
@@ -175,10 +188,15 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
             np.save(h_states_file, all_hidden_states)
         with open(atten_path, "wb+") as attention_file:
             np.save(attention_file, all_attentions)
+        with open(att_stat_path, "wb+") as att_stat_file:
+            np.save(att_stat_file, all_max)
+            np.save(att_stat_file, all_min)
+            np.save(att_stat_file, all_std)
 
     print("total score: ", total_score, "#QA pair: ", qa_pair_count,
           "hidden_state dim: ", all_hidden_states.shape,
-          "attention dim:", all_attentions.shape)
+          "attention dim:", all_attentions.shape,
+          "max dim:", all_max.shape, "min dim:", all_min.shape, "std dim:", all_std.shape)
 
     if layer_aggregration == 'mean':
         total_score /= float(qa_pair_count)
@@ -370,7 +388,7 @@ def plot_sparsity_change(data, sparsity_bar=0.025):
 
 if __name__ == '__main__':
     em_score, h_states, attens = get_hstates_attens(
-        "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=True, single_input=False)
+        "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False)
     em_str = 'EM={:.2f}'.format(em_score*100)
     # # plot histogram for all layers and all heads
     # plot_dist(attens, bin_step=0.0005, sparsity_bar=0.0005, attached_title=em_str)
