@@ -64,7 +64,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True):
         "question-answering",
         model=model_name,
         tokenizer=model_name,
-        device=0
+        device=-1
     )
 
     print("Running pipeline...")
@@ -85,7 +85,8 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True):
     len_filter = [1 if 600 <= i < 700 else 0 for i in input_lens]
     filtered_associated_data = list(compress(associated_data, len_filter))
     single_associated_data = [random.choice(associated_data)]
-    associated_data = random.sample(associated_data, 3)
+    # DEBUG: sample several instances from all data for short test
+    # associated_data = random.sample(associated_data, 3)
     fed_data = filtered_associated_data if filter_inputs else associated_data
     fed_data = single_associated_data if single_input else fed_data
 
@@ -108,8 +109,8 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True):
                    'std': np.std(att_array.reshape(*att_array.shape[:3], -1), axis=-1)}
         else:
             res['score'] = (res['score'] + em_score)
-            res['max'] = np.fmax(res['max'], np.amax(att_array.reshape(*att_array.shape[:3], -1), axis=-1))
-            res['min'] = np.fmin(res['min'], np.amin(att_array.reshape(*att_array.shape[:3], -1), axis=-1))
+            res['max'] = np.concatenate((res['max'], np.amax(att_array.reshape(*att_array.shape[:3], -1), axis=-1)), axis=1)
+            res['min'] = np.concatenate((res['min'], np.amin(att_array.reshape(*att_array.shape[:3], -1), axis=-1)), axis=1)
             res['std'] = np.concatenate((res['std'], np.std(att_array.reshape(*att_array.shape[:3], -1), axis=-1)), axis=1)
             # unfold the tensor to 2-D array to walk around buggy numpy sum
             for layer_idx, (res_layer, pred_layer) in enumerate(zip(res['hidden_states'], prediction['hidden_states'])):
@@ -132,10 +133,10 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True):
         print(prediction['answer'], em_score, res['score'] / pipeline_running_counter)
 
         # check sparsity filter apply
-        sampled_data = prediction['attentions'] * (prediction['attentions'] <= 0.005)
-        if (sampled_data > 0.0).any():
-            print("sparsity check failed!")
-            exit()
+        # sampled_data = prediction['attentions'] * (prediction['attentions'] <= 0.005)
+        # if (sampled_data > 0.0).any():
+        #     print("sparsity check failed!")
+        #     exit()
 
         # screen_clear()
 
@@ -388,7 +389,7 @@ def plot_sparsity_change(data, sparsity_bar=0.025):
 
 if __name__ == '__main__':
     em_score, h_states, attens = get_hstates_attens(
-        "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False)
+        "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=True, single_input=False)
     em_str = 'EM={:.2f}'.format(em_score*100)
     # # plot histogram for all layers and all heads
     # plot_dist(attens, bin_step=0.0005, sparsity_bar=0.0005, attached_title=em_str)
