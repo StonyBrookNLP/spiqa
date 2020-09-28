@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 
 import argparse
 import os
@@ -103,15 +104,18 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True):
 
         # aggregrate attention and hidden states
         if res is None:
-            res = {'score': em_score, 'hidden_states': prediction['hidden_states'], 'attentions': att_array, 
-                   'max': np.amax(att_array.reshape(*att_array.shape[:3], -1), axis=-1), 
-                   'min': np.amin(att_array.reshape(*att_array.shape[:3], -1), axis=-1), 
+            res = {'score': em_score, 'hidden_states': prediction['hidden_states'], 'attentions': att_array,
+                   'max': np.amax(att_array.reshape(*att_array.shape[:3], -1), axis=-1),
+                   'min': np.amin(att_array.reshape(*att_array.shape[:3], -1), axis=-1),
                    'std': np.std(att_array.reshape(*att_array.shape[:3], -1), axis=-1)}
         else:
             res['score'] = (res['score'] + em_score)
-            res['max'] = np.concatenate((res['max'], np.amax(att_array.reshape(*att_array.shape[:3], -1), axis=-1)), axis=1)
-            res['min'] = np.concatenate((res['min'], np.amin(att_array.reshape(*att_array.shape[:3], -1), axis=-1)), axis=1)
-            res['std'] = np.concatenate((res['std'], np.std(att_array.reshape(*att_array.shape[:3], -1), axis=-1)), axis=1)
+            res['max'] = np.concatenate((res['max'], np.amax(
+                att_array.reshape(*att_array.shape[:3], -1), axis=-1)), axis=1)
+            res['min'] = np.concatenate((res['min'], np.amin(
+                att_array.reshape(*att_array.shape[:3], -1), axis=-1)), axis=1)
+            res['std'] = np.concatenate(
+                (res['std'], np.std(att_array.reshape(*att_array.shape[:3], -1), axis=-1)), axis=1)
             # unfold the tensor to 2-D array to walk around buggy numpy sum
             for layer_idx, (res_layer, pred_layer) in enumerate(zip(res['hidden_states'], prediction['hidden_states'])):
                 res['hidden_states'][layer_idx][0] = np.add(res_layer[0], pred_layer[0])
@@ -204,7 +208,7 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
         all_hidden_states /= float(qa_pair_count)
         all_attentions /= float(qa_pair_count)
 
-    return total_score, all_hidden_states, all_attentions
+    return total_score, all_hidden_states, all_attentions, all_max, all_min, all_std
 
 
 def get_sparsities(threshold_list: list, sparsity_bar=0.025, layer_aggregration='mean'):
@@ -243,6 +247,23 @@ def get_sparsities(threshold_list: list, sparsity_bar=0.025, layer_aggregration=
                     layer_idx, head_idx)] = sparsity
 
     return sparsity_table
+
+
+def get_stat_features(att_features: dict):
+    '''
+    get pandas dataframe of min, max, avg and std of 12 layers x 12 heads accross all instances
+    '''
+    stat_tab_idx = ["L{}H{}".format(
+        i, j) for i, j in list(product(range(0, 12), range(0, 12)))]
+    stat_table = pd.DataFrame(index=stat_tab_idx)
+    stat_func_list = {'min': np.amin, 'max': np.amax, 'avg': np.average, 'std': np.std}
+    for att_feature_key in att_features.keys():
+        for stat_func in stat_func_list.keys():
+            stat_table['{}_{}'.format(stat_func, att_feature_key)] = \
+                stat_func_list[stat_func](
+                    att_features[att_feature_key], axis=1).flatten().tolist()
+
+    return stat_table
 
 
 def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_aggregration='mean', attached_title=''):
@@ -387,10 +408,36 @@ def plot_sparsity_change(data, sparsity_bar=0.025):
         plt.close(fig)
 
 
+def plot_stat_features(stat_features):
+    fig, ax = plt.subplots(3, 1, figsize=(24, 12), sharex=True)
+    for i, stat_feature in enumerate(['max', 'min', 'std']):
+        means, stds, maxs, mins = stat_features['avg_{}'.format(stat_feature)], \
+            stat_features['std_{}'.format(stat_feature)], \
+            stat_features['max_{}'.format(stat_feature)], \
+            stat_features['min_{}'.format(stat_feature)]
+        ax[i].errorbar(stat_features.index, means, yerr=[means - mins, maxs - means], 
+                            fmt='.', ecolor='grey', capsize=3, lw=1)
+        ax[i].errorbar(stat_features.index, means, yerr=stds, fmt='ok', lw=3)
+        ax[i].grid(linestyle='--', color='grey', alpha=0.4)
+        ax[i].margins(0.002)
+        ax[i].set_title('{}'.format(stat_feature), fontsize=18)
+        for l in range(0, 12): ax[i].axvspan(l*12-0.5, l*12+12-0.5, alpha=0.2, facecolor='C{}'.format(l))
+
+    plt.xticks(rotation=60)
+    fig.suptitle('Statistical Features for Layers of Heads', fontsize=21, y=0.99)
+    fig.tight_layout()
+    fig.savefig(RES_FIG_PATH + 'stat_features.png', dpi=600)
+    plt.close(fig)
+
+
 if __name__ == '__main__':
-    em_score, h_states, attens = get_hstates_attens(
-        "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=True, single_input=False)
+    em_score, h_states, attens, att_max, att_min, att_std = get_hstates_attens(
+        "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False)
     em_str = 'EM={:.2f}'.format(em_score*100)
+    stat_features = get_stat_features({'max': att_max, 'min': att_min, 'std': att_std})
+    plot_stat_features(stat_features)
+    stat_features.to_csv('stat_features_unfiltered.csv', sep=',')
+
     # # plot histogram for all layers and all heads
     # plot_dist(attens, bin_step=0.0005, sparsity_bar=0.0005, attached_title=em_str)
     # # plot histogram for a certain head in a certain layer

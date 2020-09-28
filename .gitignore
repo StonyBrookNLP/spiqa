@@ -13,8 +13,9 @@
 *.zip
 *.tar.bz2
 
-# ignore result figs
+# ignore result figs and tables
 *fig_res/
+*.csv
 
 # ignore params
 attention_params
