@@ -7,6 +7,7 @@ import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
+import matplotlib.patches as mpatches
 
 import argparse
 import os
@@ -60,7 +61,7 @@ def parse_squad_json(squad_ver='v1.1'):
     return data
 
 
-def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True):
+def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, spars_threshold=0.0):
     qa_pipeline = pipeline(
         "question-answering",
         model=model_name,
@@ -87,7 +88,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True):
     filtered_associated_data = list(compress(associated_data, len_filter))
     single_associated_data = [random.choice(associated_data)]
     # DEBUG: sample several instances from all data for short test
-    # associated_data = random.sample(associated_data, 3)
+    associated_data = random.sample(associated_data, 5)
     fed_data = filtered_associated_data if filter_inputs else associated_data
     fed_data = single_associated_data if single_input else fed_data
 
@@ -97,25 +98,26 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True):
     for qa_pair in fed_data:
         print("running pipeline iter {}/{}...".format(pipeline_running_counter, fed_data_len))
         prediction = qa_pipeline(
-            {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=320)
+            {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=320, spars_threshold=spars_threshold)
         em_score = max(compute_exact(prediction['answer'], gold_ans)
                        for gold_ans in qa_pair['answers'])
         att_array = prediction['attentions']
 
         # aggregrate attention and hidden states
+        flat_att = att_array.reshape(*att_array.shape[:3], -1)
         if res is None:
             res = {'score': em_score, 'hidden_states': prediction['hidden_states'], 'attentions': att_array,
-                   'max': np.amax(att_array.reshape(*att_array.shape[:3], -1), axis=-1),
-                   'min': np.amin(att_array.reshape(*att_array.shape[:3], -1), axis=-1),
-                   'std': np.std(att_array.reshape(*att_array.shape[:3], -1), axis=-1)}
+                   'max': np.amax(flat_att, axis=-1), 'min': np.amin(flat_att, axis=-1), 'mean': np.mean(flat_att, axis=-1),
+                   'std': np.std(flat_att, axis=-1), 'sparsity': np.count_nonzero(flat_att <= spars_threshold, axis=-1) / flat_att.shape[-1]}
         else:
             res['score'] = (res['score'] + em_score)
-            res['max'] = np.concatenate((res['max'], np.amax(
-                att_array.reshape(*att_array.shape[:3], -1), axis=-1)), axis=1)
-            res['min'] = np.concatenate((res['min'], np.amin(
-                att_array.reshape(*att_array.shape[:3], -1), axis=-1)), axis=1)
-            res['std'] = np.concatenate(
-                (res['std'], np.std(att_array.reshape(*att_array.shape[:3], -1), axis=-1)), axis=1)
+            res['max'] = np.concatenate((res['max'], np.amax(flat_att, axis=-1)), axis=1)
+            res['min'] = np.concatenate((res['min'], np.amin(flat_att, axis=-1)), axis=1)
+            res['mean'] = np.concatenate(
+                (res['mean'], np.mean(flat_att, axis=-1)), axis=1)
+            res['std'] = np.concatenate((res['std'], np.std(flat_att, axis=-1)), axis=1)
+            res['sparsity'] = np.concatenate((res['sparsity'], np.count_nonzero(
+                flat_att <= spars_threshold, axis=-1) / flat_att.shape[-1]), axis=1)
             # unfold the tensor to 2-D array to walk around buggy numpy sum
             for layer_idx, (res_layer, pred_layer) in enumerate(zip(res['hidden_states'], prediction['hidden_states'])):
                 res['hidden_states'][layer_idx][0] = np.add(res_layer[0], pred_layer[0])
@@ -137,10 +139,12 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True):
         print(prediction['answer'], em_score, res['score'] / pipeline_running_counter)
 
         # check sparsity filter apply
-        # sampled_data = prediction['attentions'] * (prediction['attentions'] <= 0.005)
-        # if (sampled_data > 0.0).any():
-        #     print("sparsity check failed!")
-        #     exit()
+        if spars_threshold > 0.0:
+            sampled_data = prediction['attentions'] * \
+                (prediction['attentions'] <= spars_threshold)
+            if (sampled_data > 0.0).any():
+                print("sparsity check failed!")
+                exit()
 
         # screen_clear()
 
@@ -155,8 +159,9 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
     Enable force_reinfer if one wants to ignore the existing npy file 
     and re-do the inference anyway.
     '''
-    all_hidden_states, all_attentions, total_score, qa_pair_count, all_max, all_min, all_std = \
-        None, None, None, None, None, None, None
+    all_hidden_states, all_attentions, total_score, qa_pair_count, \
+        all_max, all_min, all_mean, all_std, all_sparsity = \
+        None, None, None, None, None, None, None, None, None
     # read from file
     input_type = "_filtered" if filter_inputs else "_all"
     h_states_path, atten_path, score_path, att_stat_path = \
@@ -174,18 +179,21 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
         with open(att_stat_path, "rb") as att_stat_file:
             all_max = np.load(att_stat_file)
             all_min = np.load(att_stat_file)
+            all_mean = np.load(att_stat_file)
             all_std = np.load(att_stat_file)
+            all_sparsity = np.load(att_stat_file)
 
     # extract parameters from model
     else:
         print("Extracting attentions from model...")
         predictions = run_qa_pipeline(
-            model_name, filter_inputs=filter_inputs, single_input=single_input)
+            model_name, filter_inputs=filter_inputs, single_input=single_input, spars_threshold=0.0)
 
-        total_score, all_hidden_states, all_attentions, qa_pair_count, all_max, all_min, all_std = \
+        total_score, all_hidden_states, all_attentions, qa_pair_count, \
+            all_max, all_min, all_mean, all_std, all_sparsity = \
             predictions['score'], predictions['hidden_states'], \
             predictions['attentions'], predictions['qa_pair_len'], \
-            predictions['max'], predictions['min'], predictions['std']
+            predictions['max'], predictions['min'], predictions['mean'], predictions['std'], predictions['sparsity']
 
         with open(score_path, "wb+") as scores_file:
             np.save(scores_file, np.array([total_score, qa_pair_count]))
@@ -196,19 +204,23 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
         with open(att_stat_path, "wb+") as att_stat_file:
             np.save(att_stat_file, all_max)
             np.save(att_stat_file, all_min)
+            np.save(att_stat_file, all_mean)
             np.save(att_stat_file, all_std)
+            np.save(att_stat_file, all_sparsity)
 
     print("total score: ", total_score, "#QA pair: ", qa_pair_count,
           "hidden_state dim: ", all_hidden_states.shape,
           "attention dim:", all_attentions.shape,
-          "max dim:", all_max.shape, "min dim:", all_min.shape, "std dim:", all_std.shape)
+          "max dim:", all_max.shape, "min dim:", all_min.shape,
+          "mean dim:", all_mean.shape, "std dim:", all_std.shape,
+          "sparsity dim:", all_sparsity.shape)
 
     if layer_aggregration == 'mean':
         total_score /= float(qa_pair_count)
         all_hidden_states /= float(qa_pair_count)
         all_attentions /= float(qa_pair_count)
 
-    return total_score, all_hidden_states, all_attentions, all_max, all_min, all_std
+    return total_score, all_hidden_states, all_attentions, all_max, all_min, all_mean, all_std, all_sparsity
 
 
 def get_sparsities(threshold_list: list, sparsity_bar=0.025, layer_aggregration='mean'):
@@ -246,6 +258,10 @@ def get_sparsities(threshold_list: list, sparsity_bar=0.025, layer_aggregration=
                 sparsity_table.at[threshold, 'layer_{}_head_{}'.format(
                     layer_idx, head_idx)] = sparsity
 
+        sparsity_table.at[threshold, 'all'] = \
+            (all_attentions <= sparsity_bar).sum() / all_attentions.flatten().shape[0]
+        sparsity_table.at[threshold, 'em'] = total_score
+
     return sparsity_table
 
 
@@ -275,11 +291,17 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
     layers: layer_<0-11>
     sparsity_bar: threshold for sparsity calculation
     '''
-    def get_bin_edges(bin_step, head_idx, layer_idx):
+    def get_bin_edges(bin_step, head_idx, layer_idx, scale='normal'):
         if type(bin_step) is int:
-            return bin_step
+            if scale == 'log':
+                return pd.Series(10**np.linspace(-9.0, 0.0, bin_step+1))
+            else:
+                return bin_step
         elif type(bin_step) is float:
-            return pd.Series(np.append(np.arange(0.0, 1.0, bin_step), 1.0))
+            if scale == 'log':
+                return pd.Series(np.append(10**np.arange(-9.0, 0.0, bin_step), 0.0))
+            else:
+                return pd.Series(np.append(np.arange(0, 1.0, bin_step), 1.0))
         elif type(bin_step) is list:
             return pd.Series(np.append(np.arange(0.0, 1.0, bin_step[layer_idx][head_idx]), 1.0))
         else:
@@ -302,12 +324,13 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
             for head_idx, head in atten_layers_pd.iteritems():
                 head_idx_int = int(head_idx.split(',')[0].split('_')[1])
                 curr_ax = ax[int(head_idx_int/4), int(head_idx_int % 4)]
-                head.hist(ax=curr_ax, bins=get_bin_edges(bin_step, layer_idx, head_idx),
+                head.hist(ax=curr_ax, bins=get_bin_edges(bin_step, layer_idx, head_idx, scale='log'),
                           weights=(np.ones_like(head) / len(head)), color='C0')
-                head.hist(ax=curr_ax, bins=get_bin_edges(bin_step, layer_idx, head_idx),
+                head.hist(ax=curr_ax, bins=get_bin_edges(bin_step, layer_idx, head_idx, scale='log'),
                           weights=(np.ones_like(head) / len(head)), cumulative=True,
                           histtype='step', linewidth=1, color='C3')
-                curr_ax.set_xlim([0.0, 0.03])
+                curr_ax.set_xscale('log')
+                curr_ax.set_xlim([10**-9, 1])
                 curr_ax.set_ylim([0.0, 1.0])
                 curr_ax.set_title('\n'.join(wrap(head_idx, 38)))
 
@@ -387,6 +410,9 @@ def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True, laye
 
 
 def plot_sparsity_change(data, sparsity_bar=0.025):
+    '''
+    plot sparsity change for different sparsity dropout threshold
+    '''
     spars_threshold = [float(i) for i in data.index.tolist()]
     for layer_idx in range(0, 12):
         print('plotting curve for sparsities...')
@@ -407,6 +433,31 @@ def plot_sparsity_change(data, sparsity_bar=0.025):
         plt.clf()
         plt.close(fig)
 
+    # plot sparsity/accu vs threshold
+    fig, ax1 = plt.subplots()
+    fig.set_size_inches(8, 6)
+
+    # legends
+    patches = []
+    patches.append(mpatches.Patch(color='C0', label='sparsity'))
+    patches.append(mpatches.Patch(color='C1', label='EM score'))
+
+    ax1.set_xlabel('sparsity dropping threshold')
+    ax1.set_ylabel('sparsity (bar={})'.format(sparsity_bar))
+    ax1.plot(spars_threshold, data['all'], color='C0', marker='s', markersize='4.5')
+    ax2 = ax1.twinx()
+    ax2.set_ylabel('EM score')
+    ax2.plot(spars_threshold, data['em']*100, color='C1', marker='s', markersize='4.5')
+    ax1.set_yticks(np.linspace(0.2, 1.0, 9))
+    ax2.set_yticks(np.linspace(20, 100, 9))
+
+    fig.suptitle('Sparsity and Accuracy vs. Sparsity Dropping Threshold')
+    fig.tight_layout()
+    plt.grid(linestyle='--', alpha=0.5, color='grey')
+    plt.legend(handles=patches, loc='upper left')
+    plt.savefig(RES_FIG_PATH+'sparse_accu.png', dpi=600)
+    plt.close(fig)
+
 
 def plot_stat_features(stat_features):
     fig, ax = plt.subplots(3, 1, figsize=(24, 12), sharex=True)
@@ -415,13 +466,14 @@ def plot_stat_features(stat_features):
             stat_features['std_{}'.format(stat_feature)], \
             stat_features['max_{}'.format(stat_feature)], \
             stat_features['min_{}'.format(stat_feature)]
-        ax[i].errorbar(stat_features.index, means, yerr=[means - mins, maxs - means], 
-                            fmt='.', ecolor='grey', capsize=3, lw=1)
+        ax[i].errorbar(stat_features.index, means, yerr=[means - mins, maxs - means],
+                       fmt='.', ecolor='grey', capsize=3, lw=1)
         ax[i].errorbar(stat_features.index, means, yerr=stds, fmt='ok', lw=3)
         ax[i].grid(linestyle='--', color='grey', alpha=0.4)
         ax[i].margins(0.002)
         ax[i].set_title('{}'.format(stat_feature), fontsize=18)
-        for l in range(0, 12): ax[i].axvspan(l*12-0.5, l*12+12-0.5, alpha=0.2, facecolor='C{}'.format(l))
+        for l in range(0, 12):
+            ax[i].axvspan(l*12-0.5, l*12+12-0.5, alpha=0.2, facecolor='C{}'.format(l))
 
     plt.xticks(rotation=60)
     fig.suptitle('Statistical Features for Layers of Heads', fontsize=21, y=0.99)
@@ -431,15 +483,16 @@ def plot_stat_features(stat_features):
 
 
 if __name__ == '__main__':
-    em_score, h_states, attens, att_max, att_min, att_std = get_hstates_attens(
-        "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False)
+    em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = get_hstates_attens(
+        "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=True, single_input=False)
     em_str = 'EM={:.2f}'.format(em_score*100)
-    stat_features = get_stat_features({'max': att_max, 'min': att_min, 'std': att_std})
-    plot_stat_features(stat_features)
-    stat_features.to_csv('stat_features_unfiltered.csv', sep=',')
+    print(att_sparsity)
+    # stat_features = get_stat_features({'max': att_max, 'min': att_min, 'std': att_std})
+    # plot_stat_features(stat_features)
+    # stat_features.to_csv('stat_features_unfiltered.csv', sep=',')
 
     # # plot histogram for all layers and all heads
-    # plot_dist(attens, bin_step=0.0005, sparsity_bar=0.0005, attached_title=em_str)
+    # plot_dist(attens, bin_step=60, sparsity_bar=0.0005, attached_title=em_str)
     # # plot histogram for a certain head in a certain layer
     # plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
     #           single_head_idx=(0, 0), attached_title=em_str)
@@ -456,6 +509,6 @@ if __name__ == '__main__':
     # # compute sparsity
     # spars_threshold = ['0.0', '0.0005', '0.001', '0.005', '0.01', '0.05', '0.1']
     # spars = get_sparsities(spars_threshold, sparsity_bar=0.0005)
-    # #print average sparsity change
+    # # print average sparsity change
     # print(spars.mean(axis=1))
     # plot_sparsity_change(spars, sparsity_bar=0.0005)
