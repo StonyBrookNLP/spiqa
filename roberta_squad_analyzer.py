@@ -61,12 +61,20 @@ def parse_squad_json(squad_ver='v1.1'):
     return data
 
 
-def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, spars_threshold=0.0):
+def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, sample_inputs=-1, spars_threshold=0.0):
+    '''
+    run question answering pipeline. 
+    filter inputs: filter out the question-context pairs that have lengths out of 
+    600-700 chars.
+    sample inputs: randomly sample some question-context pairs to get all 
+    raw attentions from each of them, instead of aggregrating the values
+    the sample_inputs should be less than 100 to control the RAM usage under 5.89GB
+    '''
     qa_pipeline = pipeline(
         "question-answering",
         model=model_name,
         tokenizer=model_name,
-        device=-1
+        device=0
     )
 
     print("Running pipeline...")
@@ -82,15 +90,21 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, spar
     associated_data = sum(associated_data, [])
     input_lens = [len(i['context']+i['question']) for i in associated_data]
     print("QA string pair length: [{}, {}]".format(min(input_lens), max(input_lens)))
+
+    # sample several instances from all data for short test
+    if sample_inputs > 0:
+        associated_data = random.sample(associated_data, sample_inputs)
+
+    fed_data = associated_data
     # construct and apply length filter to inputs
     # TODO: parameterize the length selector
-    len_filter = [1 if 600 <= i < 700 else 0 for i in input_lens]
-    filtered_associated_data = list(compress(associated_data, len_filter))
-    single_associated_data = [random.choice(associated_data)]
-    # DEBUG: sample several instances from all data for short test
-    associated_data = random.sample(associated_data, 5)
-    fed_data = filtered_associated_data if filter_inputs else associated_data
-    fed_data = single_associated_data if single_input else fed_data
+    if filter_inputs:
+        len_filter = [1 if 600 <= i < 700 else 0 for i in input_lens]
+        filtered_associated_data = list(compress(associated_data, len_filter))
+        fed_data = filtered_associated_data
+    if single_input:
+        single_associated_data = [random.choice(associated_data)]
+        fed_data = single_associated_data if single_input else fed_data
 
     res, pipeline_running_counter, fed_data_len = None, 0, len(fed_data)
     print("Among all inputs {}/{} are selected.".format(fed_data_len, len(associated_data)))
@@ -118,18 +132,25 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, spar
             res['std'] = np.concatenate((res['std'], np.std(flat_att, axis=-1)), axis=1)
             res['sparsity'] = np.concatenate((res['sparsity'], np.count_nonzero(
                 flat_att <= spars_threshold, axis=-1) / flat_att.shape[-1]), axis=1)
-            # unfold the tensor to 2-D array to walk around buggy numpy sum
+
             for layer_idx, (res_layer, pred_layer) in enumerate(zip(res['hidden_states'], prediction['hidden_states'])):
                 res['hidden_states'][layer_idx][0] = np.add(res_layer[0], pred_layer[0])
-
-            for layer_idx, (res_layer, pred_layer) in enumerate(zip(res['attentions'], prediction['attentions'])):
-                for head_idx, (res_head, pred_head) in enumerate(zip(res_layer[0], pred_layer[0])):
-                    res['attentions'][layer_idx][0][head_idx] = np.add(
-                        res_head, pred_head)
+            if sample_inputs > 0:
+                # just concat all attention across all instances
+                # concate the last axis to save one time of reshapping for hist plot
+                res['attentions'] = np.concatenate(
+                    (res['attentions'], prediction['attentions']), axis=-1)
+            else:
+                # aggregrate all the results
+                # unfold the tensor to 2-D array to walk around buggy numpy sum
+                for layer_idx, (res_layer, pred_layer) in enumerate(zip(res['attentions'], prediction['attentions'])):
+                    for head_idx, (res_head, pred_head) in enumerate(zip(res_layer[0], pred_layer[0])):
+                        res['attentions'][layer_idx][0][head_idx] = np.add(
+                            res_head, pred_head)
 
         pipeline_running_counter += 1
 
-        if ((res['attentions'] > pipeline_running_counter).any()):
+        if (sample_inputs > 0 and (res['attentions'] > pipeline_running_counter).any()):
             idx0, idx1, idx2, idx3, idx4 = np.where(
                 res['attentions'] > pipeline_running_counter)
             print("iter {} has attention larger than 1 ({}), exist..."
@@ -152,18 +173,28 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, spar
     return res
 
 
-def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True, single_input=True, layer_aggregration='mean'):
+def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True, single_input=True, sample_inputs=-1, layer_aggregration='mean'):
     '''
     get the hidden state and attention from pipeline result. 
     The model_name should be a valid Huggingface transformer model. 
     Enable force_reinfer if one wants to ignore the existing npy file 
     and re-do the inference anyway.
+    filter inputs: filter out the question-context pairs that have lengths out of 
+    600-700 chars.
+    sample inputs: randomly sample some question-context pairs to get all 
+    raw attentions from each of them, instead of aggregrating the values
+    the sample_inputs should be less than 100 to control the RAM usage under 5.89GB
+    sample inputs is -1 means using all inputs
     '''
     all_hidden_states, all_attentions, total_score, qa_pair_count, \
         all_max, all_min, all_mean, all_std, all_sparsity = \
         None, None, None, None, None, None, None, None, None
+
+    if sample_inputs > 100 or sample_inputs == 0:
+        raise ValueError("the sample inputs should be (0, 100]")
     # read from file
-    input_type = "_filtered" if filter_inputs else "_all"
+    input_type = "_sampled" if sample_inputs else "_all"
+    input_type += "_filtered" if filter_inputs else ""
     h_states_path, atten_path, score_path, att_stat_path = \
         (PARAM_PATH + i + input_type +
          '.npy' for i in ['hidden_states', 'attentions', 'score', 'att_stat_features'])
@@ -182,12 +213,11 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
             all_mean = np.load(att_stat_file)
             all_std = np.load(att_stat_file)
             all_sparsity = np.load(att_stat_file)
-
     # extract parameters from model
     else:
         print("Extracting attentions from model...")
         predictions = run_qa_pipeline(
-            model_name, filter_inputs=filter_inputs, single_input=single_input, spars_threshold=0.0)
+            model_name, filter_inputs=filter_inputs, single_input=single_input, sample_inputs=sample_inputs, spars_threshold=0.0)
 
         total_score, all_hidden_states, all_attentions, qa_pair_count, \
             all_max, all_min, all_mean, all_std, all_sparsity = \
@@ -215,7 +245,7 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
           "mean dim:", all_mean.shape, "std dim:", all_std.shape,
           "sparsity dim:", all_sparsity.shape)
 
-    if layer_aggregration == 'mean':
+    if layer_aggregration == 'mean' and sample_inputs == 0:
         total_score /= float(qa_pair_count)
         all_hidden_states /= float(qa_pair_count)
         all_attentions /= float(qa_pair_count)
@@ -236,7 +266,7 @@ def get_sparsities(threshold_list: list, sparsity_bar=0.025, layer_aggregration=
         input_type = "_all"
         score_path = (params + 'score' + input_type + '.npy')
         att_stat_path = (params + 'att_stat_features' + input_type + '.npy')
-        if os.path.isfile(att_stat_path) and os.path.isfile(score_path) :
+        if os.path.isfile(att_stat_path) and os.path.isfile(score_path):
             with open(score_path, "rb") as score_file:
                 total_score, qa_pair_count = (i for i in np.load(score_file))
             with open(att_stat_path, "rb") as att_stat_file:
@@ -249,7 +279,8 @@ def get_sparsities(threshold_list: list, sparsity_bar=0.025, layer_aggregration=
         avg_all_sparsity = np.mean(all_sparsity, axis=1)
         for layer_idx, layer in enumerate(avg_all_sparsity):
             for head_idx, spars_per_head in enumerate(layer):
-                sparsity_table.at[threshold, 'layer_{}_head_{}'.format(layer_idx, head_idx)] = spars_per_head
+                sparsity_table.at[threshold, 'layer_{}_head_{}'.format(
+                    layer_idx, head_idx)] = spars_per_head
 
         sparsity_table.at[threshold, 'all'] = np.mean(all_sparsity.flatten())
         sparsity_table.at[threshold, 'em'] = total_score / qa_pair_count
@@ -456,7 +487,7 @@ def plot_sparsity_change(data):
     plt.close(fig)
 
 
-def plot_stat_features(stat_features, features_to_plot = ['max', 'min', 'std']):
+def plot_stat_features(stat_features, features_to_plot=['max', 'min', 'std']):
     num_features = len(features_to_plot)
     fig, ax = plt.subplots(num_features, 1, figsize=(24, num_features*4), sharex=True)
     for i, stat_feature in enumerate(features_to_plot):
@@ -482,15 +513,16 @@ def plot_stat_features(stat_features, features_to_plot = ['max', 'min', 'std']):
 
 if __name__ == '__main__':
     em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = get_hstates_attens(
-        "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False)
+        "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False, sample_inputs=5)
     em_str = 'EM={:.2f}'.format(em_score*100)
     # stat_features = get_stat_features({'max': att_max, 'min': att_min, 'mean': att_mean, 'std': att_std})
     # print(stat_features)
     # plot_stat_features(stat_features)
     # stat_features.to_csv('stat_features_unfiltered.csv', sep=',')
 
-    # # plot histogram for all layers and all heads
-    # plot_dist(attens, bin_step=60, sparsity_bar=0.0005, attached_title=em_str)
+    # plot histogram for all layers and all heads
+    plot_dist(attens, bin_step=60, sparsity_bar=0.0005,
+              layer_aggregration='None', attached_title=em_str)
     # # plot histogram for a certain head in a certain layer
     # plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
     #           single_head_idx=(0, 0), attached_title=em_str)
@@ -504,8 +536,8 @@ if __name__ == '__main__':
     # plot_heatmap(attens, sparsity_bar=0.0005, binarize=True, attached_title=em_str)
     # plot_heatmap(attens, sparsity_bar=0.0005, binarize=False,
     #              auto_scale=True, attached_title=em_str)
-    # compute sparsity
-    spars_threshold = ['0.0005', '0.001', '0.005', '0.01', '0.05', '0.1']
-    spars = get_sparsities(spars_threshold)
-    print(spars)
-    plot_sparsity_change(spars)
+    # # compute sparsity
+    # spars_threshold = ['0.0005', '0.001', '0.005', '0.01', '0.05', '0.1']
+    # spars = get_sparsities(spars_threshold)
+    # print(spars)
+    # plot_sparsity_change(spars)
