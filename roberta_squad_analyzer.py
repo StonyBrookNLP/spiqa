@@ -106,7 +106,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
         single_associated_data = [random.choice(associated_data)]
         fed_data = single_associated_data if single_input else fed_data
 
-    res, pipeline_running_counter, fed_data_len = None, 0, len(fed_data)
+    res, pipeline_running_counter, overlap_inst_counter, fed_data_len = None, 0, 0, len(fed_data)
     print("Among all inputs {}/{} are selected.".format(fed_data_len, len(associated_data)))
     # run the prediction
     for qa_pair in fed_data:
@@ -138,8 +138,9 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
             if sample_inputs > 0:
                 # just concat all attention across all instances
                 # concate the last axis to save one time of reshapping for hist plot
+                if prediction['attentions'].shape[1] > 1: overlap_inst_counter += prediction['attentions'].shape[1]
                 res['attentions'] = np.concatenate(
-                    (res['attentions'], prediction['attentions']), axis=-1)
+                    ([res['attentions']] + np.array_split(prediction['attentions'], prediction['attentions'].shape[1], axis=1)), axis=-1)
             else:
                 # aggregrate all the results
                 # unfold the tensor to 2-D array to walk around buggy numpy sum
@@ -158,6 +159,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
             exit()
 
         print(prediction['answer'], em_score, res['score'] / pipeline_running_counter)
+        print("ratio of overlapped instances: {}/{}".format(overlap_inst_counter, res['max'].shape[1]))
 
         # check sparsity filter apply
         if spars_threshold > 0.0:
@@ -513,7 +515,7 @@ def plot_stat_features(stat_features, features_to_plot=['max', 'min', 'std']):
 
 if __name__ == '__main__':
     em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = get_hstates_attens(
-        "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False, sample_inputs=5)
+        "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False, sample_inputs=100)
     em_str = 'EM={:.2f}'.format(em_score*100)
     # stat_features = get_stat_features({'max': att_max, 'min': att_min, 'mean': att_mean, 'std': att_std})
     # print(stat_features)
