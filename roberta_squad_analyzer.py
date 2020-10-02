@@ -13,7 +13,7 @@ import argparse
 import os
 import random
 from subprocess import call
-from math import isnan, fsum
+from math import isnan, fsum, log
 from textwrap import wrap
 import urllib.request
 import json
@@ -202,7 +202,7 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
          '.npy' for i in ['hidden_states', 'attentions', 'score', 'att_stat_features'])
     if os.path.isfile(h_states_path) and os.path.isfile(atten_path) and \
             os.path.isfile(score_path) and os.path.isfile(att_stat_path) and not force_reinfer:
-        print("Loading parameters from file...")
+        print("Loading parameters from file {}...".format(PARAM_PATH + input_type))
         with open(score_path, "rb") as score_file:
             total_score, qa_pair_count = (i for i in np.load(score_file))
         with open(h_states_path, "rb") as h_states_file:
@@ -246,10 +246,11 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
           "max dim:", all_max.shape, "min dim:", all_min.shape,
           "mean dim:", all_mean.shape, "std dim:", all_std.shape,
           "sparsity dim:", all_sparsity.shape)
+    
+    total_score /= float(qa_pair_count)
 
-    if layer_aggregration == 'mean' and sample_inputs == 0:
-        total_score /= float(qa_pair_count)
-        all_hidden_states /= float(qa_pair_count)
+    if layer_aggregration == 'mean' and sample_inputs == 0:  
+        all_hidden_states /= float(qa_pair_count)  
         all_attentions /= float(qa_pair_count)
 
     return total_score, all_hidden_states, all_attentions, all_max, all_min, all_mean, all_std, all_sparsity
@@ -317,17 +318,21 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
     sparsity_bar: threshold for sparsity calculation
     '''
     # set histogram x axis starting point here
-    hist_x_start = -7
+    hist_x_start, hist_x_end = -6, log(1+1e-6, 10)
 
     def get_bin_edges(bin_step, head_idx, layer_idx, scale='normal'):
         if type(bin_step) is int:
             if scale == 'log':
-                return pd.Series(10**np.linspace(hist_x_start, 0.0, bin_step+1))
+                bin_edges = 10**np.linspace(hist_x_start, hist_x_end, bin_step+1)
+                bin_edges[0] -= 10**(hist_x_start-1)
+                return pd.Series(bin_edges)
             else:
                 return bin_step
         elif type(bin_step) is float:
             if scale == 'log':
-                return pd.Series(np.append(10**np.arange(hist_x_start, 0.0, bin_step), 0.0))
+                bin_edges = 10**np.append(np.arange(hist_x_start, hist_x_end, bin_step), hist_x_end)
+                bin_edges[0] -= 10**(hist_x_start-1)
+                return pd.Series(bin_edges)
             else:
                 return pd.Series(np.append(np.arange(0, 1.0, bin_step), 1.0))
         elif type(bin_step) is list:
@@ -343,7 +348,7 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
             for head_idx, head in enumerate(layer[0]):
                 sparsity = (head <= (sparsity_bar)).sum() / head.flatten().shape[0]
                 atten_layers['head_{}, max: {:.4f}, min: {:.4f}, spars: {:.4f}, sparsity_bar: {:.4f}'.format(
-                    head_idx, np.amax(head), np.amin(head), sparsity, sparsity_bar)] = head.flatten().tolist()
+                    head_idx, np.amax(head), np.amin(head), sparsity, sparsity_bar)] = (head.flatten()+1e-6).tolist()
 
             atten_layers_pd = pd.DataFrame(atten_layers)
             # create vars for plotting
@@ -354,12 +359,11 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
                 curr_ax = ax[int(head_idx_int/4), int(head_idx_int % 4)]
                 head.hist(ax=curr_ax, bins=get_bin_edges(bin_step, layer_idx, head_idx, scale='log'),
                           weights=(np.ones_like(head) / len(head)), color='C0')
-                cdf_bottom = head[head < 10**hist_x_start].count() / head.count()
                 head.hist(ax=curr_ax, bins=get_bin_edges(bin_step, layer_idx, head_idx, scale='log'),
                           weights=(np.ones_like(head) / len(head)), cumulative=True,
-                          histtype='step', linewidth=1, color='C3', bottom=cdf_bottom)
+                          histtype='step', linewidth=1, color='C3')
                 curr_ax.set_xscale('log')
-                curr_ax.set_xlim([10 ** hist_x_start, 1])
+                curr_ax.set_xlim([10 ** hist_x_start, 10 ** hist_x_end])
                 # set y as log as well
                 # curr_ax.set_yscale('log')
                 curr_ax.set_ylim([0.0, 1.0])
@@ -515,7 +519,7 @@ def plot_stat_features(stat_features, features_to_plot=['max', 'min', 'std']):
 
 if __name__ == '__main__':
     em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = get_hstates_attens(
-        "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False, sample_inputs=100)
+        "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False, sample_inputs=100, layer_aggregration='None')
     em_str = 'EM={:.2f}'.format(em_score*100)
     # stat_features = get_stat_features({'max': att_max, 'min': att_min, 'mean': att_mean, 'std': att_std})
     # print(stat_features)
