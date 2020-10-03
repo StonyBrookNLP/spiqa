@@ -318,7 +318,8 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
     sparsity_bar: threshold for sparsity calculation
     '''
     # set histogram x axis starting point here
-    hist_x_start, hist_x_end = -6, log(1+1e-6, 10)
+    offset = 1e-8
+    hist_x_start, hist_x_end = log(offset, 10), log(1+offset, 10)
 
     def get_bin_edges(bin_step, head_idx, layer_idx, scale='normal'):
         if type(bin_step) is int:
@@ -348,7 +349,7 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
             for head_idx, head in enumerate(layer[0]):
                 sparsity = (head <= (sparsity_bar)).sum() / head.flatten().shape[0]
                 atten_layers['head_{}, max: {:.4f}, min: {:.4f}, spars: {:.4f}, sparsity_bar: {:.4f}'.format(
-                    head_idx, np.amax(head), np.amin(head), sparsity, sparsity_bar)] = (head.flatten()+1e-6).tolist()
+                    head_idx, np.amax(head), np.amin(head), sparsity, sparsity_bar)] = (head.flatten()+offset).tolist()
 
             atten_layers_pd = pd.DataFrame(atten_layers)
             # create vars for plotting
@@ -397,6 +398,123 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
         fig.tight_layout()
         plt.savefig(
             RES_FIG_PATH+'hist_singlehead_layer{}_head{}.png'.format(layer_idx, head_idx), dpi=600)
+        plt.clf()
+        plt.close(fig)
+
+def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title=''):
+    '''
+    computing histogram on-the-fly without saving the attentions in the memory
+    '''
+    # set histogram x axis starting point here
+    offset = 1e-8
+    hist_x_start, hist_x_end = log(offset, 10), log(1+offset, 10)
+    qa_pipeline = pipeline(
+        "question-answering",
+        model=model_name,
+        tokenizer=model_name,
+        device=0
+    )
+
+    def get_bin_edges(bin_step, scale='normal'):
+        if type(bin_step) is int:
+            if scale == 'log':
+                bin_edges = 10**np.linspace(hist_x_start, hist_x_end, bin_step+1)
+                bin_edges[0] -= 10**(hist_x_start-1)
+                return pd.Series(bin_edges)
+            else:
+                return bin_step
+        elif type(bin_step) is float:
+            if scale == 'log':
+                bin_edges = 10**np.append(np.arange(hist_x_start, hist_x_end, bin_step), hist_x_end)
+                bin_edges[0] -= 10**(hist_x_start-1)
+                return pd.Series(bin_edges)
+            else:
+                return pd.Series(np.append(np.arange(0, 1.0, bin_step), 1.0))
+        else:
+            return None
+
+        qa_pipeline = pipeline(
+        "question-answering",
+        model=model_name,
+        tokenizer=model_name,
+        device=0
+    )
+
+    print("Running pipeline...")
+    data = parse_squad_json()
+    associated_data = []
+    for context in data.keys():
+        context_ques_pair = []
+        for ques in data[context]:
+            context_ques_pair.append(
+                {'context': context, 'question': ques['question'], 'answers': ques['answers']})
+        associated_data.append(context_ques_pair)
+
+    associated_data = sum(associated_data, [])
+    # DEBUG: sample 10 instances from debugging
+    # associated_data = random.sample(sum(associated_data, []), 10)
+    input_lens = [len(i['context']+i['question']) for i in associated_data]
+    print("QA string pair length: [{}, {}]".format(min(input_lens), max(input_lens)))
+    pipeline_running_counter, fed_data_len = 0, len(associated_data)
+
+    atten_bins, atten_hist, all_score = get_bin_edges(bin_step, scale='log'), None, 0
+    all_max, all_min, all_sparse_count, all_count = None, None, None, 0
+    # run the prediction, calculate and store the hist
+    for qa_pair in associated_data:
+        print("running pipeline iter {}/{}...".format(pipeline_running_counter, fed_data_len))
+        prediction = qa_pipeline(
+            {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=320, spars_threshold=0.0)
+        pipeline_running_counter += 1
+        em_score = max(compute_exact(prediction['answer'], gold_ans)
+                       for gold_ans in qa_pair['answers'])
+        flat_att = np.concatenate(
+                        np.array_split(prediction['attentions'], prediction['attentions'].shape[1], axis=1), axis=-1)
+        flat_att = np.squeeze(flat_att.reshape(*flat_att.shape[:3], -1))
+        print("flat_att shape:", flat_att.shape)
+
+        all_score += em_score
+        curr_hist = np.apply_along_axis(lambda a: np.histogram(a+offset, atten_bins)[0], -1, flat_att)
+        curr_max, curr_min = np.amax(flat_att, axis=-1), np.amin(flat_att, axis=-1)
+        curr_sparse_count = np.apply_along_axis(lambda a: (a < sparsity_bar).sum(), -1, flat_att)
+
+        atten_hist = curr_hist if atten_hist is None else np.add(atten_hist, curr_hist)
+        all_max = curr_max if all_max is None else np.maximum(all_max, curr_max)
+        all_min = curr_min if all_min is None else np.minimum(all_min, curr_min)
+        all_sparse_count = curr_sparse_count if all_sparse_count is None else np.add(all_sparse_count, curr_sparse_count)
+        all_count += flat_att.shape[-1]
+
+    print("atten_hist shape:", atten_hist.shape)
+    print("EM score", all_score / fed_data_len)
+
+    # Normalization
+    atten_hist = np.apply_along_axis(lambda a: a / np.sum(a), -1, atten_hist)
+    atten_bar_width = [atten_bins[i] - atten_bins[i-1] for i in range(1, len(atten_bins)) ]
+
+    with open(PARAM_PATH + "atten_hist.npy", "wb+") as hist_file:
+        np.save(hist_file, atten_hist)
+        np.save(hist_file, atten_bins)
+    #plot atten_hist
+    for layer_idx, layer in enumerate(atten_hist):
+        fig, ax = plt.subplots(3, 4, figsize=(21, 12))
+        for head_idx, head in enumerate(layer):
+            curr_ax = ax[int(head_idx/4), int(head_idx % 4)]
+            curr_ax.set_xscale('log')
+            curr_ax.bar(atten_bins[:-1], head, atten_bar_width, color='C0')
+            curr_ax.step(atten_bins[:-1], np.cumsum(head), color='C3', linewidth=1)
+
+            subplot_title = 'head_{}, max: {:.4f}, min: {:.4f}, spars: {:.4f}, sparsity_bar: {:.4f}'.format(
+                    head_idx, all_max[layer_idx][head_idx], all_min[layer_idx][head_idx], 
+                    all_sparse_count[layer_idx][head_idx] / all_count, sparsity_bar)
+            curr_ax.set_title('\n'.join(wrap(subplot_title, 38)))
+            curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
+            curr_ax.set_xscale('log')
+            # curr_ax.set_yscale('log')
+            curr_ax.set_xlim([10 ** hist_x_start - 10 ** (hist_x_start-1), 10 ** hist_x_end])
+            
+
+        fig.suptitle("Histogram for layer {} per head {}".format(layer_idx, attached_title), fontsize=21, y=0.99)
+        fig.tight_layout()
+        plt.savefig(RES_FIG_PATH+'hist_layer_otf_{}.png'.format(layer_idx), dpi=600)
         plt.clf()
         plt.close(fig)
 
@@ -518,17 +636,17 @@ def plot_stat_features(stat_features, features_to_plot=['max', 'min', 'std']):
 
 
 if __name__ == '__main__':
-    em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = get_hstates_attens(
-        "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False, sample_inputs=100, layer_aggregration='None')
-    em_str = 'EM={:.2f}'.format(em_score*100)
+    # em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = get_hstates_attens(
+    #     "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False, sample_inputs=100, layer_aggregration='None')
+    # em_str = 'EM={:.2f}'.format(em_score*100)
     # stat_features = get_stat_features({'max': att_max, 'min': att_min, 'mean': att_mean, 'std': att_std})
     # print(stat_features)
     # plot_stat_features(stat_features)
     # stat_features.to_csv('stat_features_unfiltered.csv', sep=',')
 
-    # plot histogram for all layers and all heads
-    plot_dist(attens, bin_step=60, sparsity_bar=0.0005,
-              layer_aggregration='None', attached_title=em_str)
+    # # plot histogram for all layers and all heads
+    # plot_dist(attens, bin_step=60, sparsity_bar=0.0005,
+    #           layer_aggregration='None', attached_title=em_str)
     # # plot histogram for a certain head in a certain layer
     # plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
     #           single_head_idx=(0, 0), attached_title=em_str)
@@ -547,3 +665,5 @@ if __name__ == '__main__':
     # spars = get_sparsities(spars_threshold)
     # print(spars)
     # plot_sparsity_change(spars)
+
+    plot_dist_dynamic("csarron/roberta-base-squad-v1", 200, 0.0005)
