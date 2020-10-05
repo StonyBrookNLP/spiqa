@@ -123,7 +123,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
         if res is None:
             res = {'score': em_score, 'hidden_states': prediction['hidden_states'], 'attentions': att_array,
                    'max': np.amax(flat_att, axis=-1), 'min': np.amin(flat_att, axis=-1), 'mean': np.mean(flat_att, axis=-1),
-                   'std': np.std(flat_att, axis=-1), 'sparsity': np.count_nonzero(flat_att <= spars_threshold, axis=-1) / flat_att.shape[-1]}
+                   'std': np.std(flat_att, axis=-1), 'sparsity': np.count_nonzero(flat_att == 0.0, axis=-1) / flat_att.shape[-1]}
         else:
             res['score'] = (res['score'] + em_score)
             res['max'] = np.concatenate((res['max'], np.amax(flat_att, axis=-1)), axis=1)
@@ -132,7 +132,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
                 (res['mean'], np.mean(flat_att, axis=-1)), axis=1)
             res['std'] = np.concatenate((res['std'], np.std(flat_att, axis=-1)), axis=1)
             res['sparsity'] = np.concatenate((res['sparsity'], np.count_nonzero(
-                flat_att <= spars_threshold, axis=-1) / flat_att.shape[-1]), axis=1)
+                flat_att == 0.0, axis=-1) / flat_att.shape[-1]), axis=1)
 
             for layer_idx, (res_layer, pred_layer) in enumerate(zip(res['hidden_states'], prediction['hidden_states'])):
                 res['hidden_states'][layer_idx][0] = np.add(res_layer[0], pred_layer[0])
@@ -166,8 +166,8 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
 
         # check sparsity filter apply
         if spars_threshold > 0.0:
-            sampled_data = prediction['attentions'] * \
-                (prediction['attentions'] <= spars_threshold)
+            att_mask = np.expand_dims(np.amax(prediction['attentions'], axis=-1) * spars_threshold, axis=-1)
+            sampled_data = prediction['attentions'] * (prediction['attentions'] <= att_mask)
             if (sampled_data > 0.0).any():
                 print("sparsity check failed!")
                 exit()
@@ -222,7 +222,7 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
     else:
         print("Extracting attentions from model...")
         predictions = run_qa_pipeline(
-            model_name, filter_inputs=filter_inputs, single_input=single_input, sample_inputs=sample_inputs, spars_threshold=0.0)
+            model_name, filter_inputs=filter_inputs, single_input=single_input, sample_inputs=sample_inputs, spars_threshold=0.01)
 
         total_score, all_hidden_states, all_attentions, qa_pair_count, \
             all_max, all_min, all_mean, all_std, all_sparsity = \
@@ -657,9 +657,9 @@ def plot_stat_features(stat_features, features_to_plot=['max', 'min', 'std']):
 
 
 if __name__ == '__main__':
-    # em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = get_hstates_attens(
-    #     "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False, sample_inputs=100, layer_aggregration='None')
-    # em_str = 'EM={:.2f}'.format(em_score*100)
+    em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = get_hstates_attens(
+        "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False, layer_aggregration='mean')
+    em_str = 'EM={:.2f}'.format(em_score*100)
     # stat_features = get_stat_features({'max': att_max, 'min': att_min, 'mean': att_mean, 'std': att_std})
     # print(stat_features)
     # plot_stat_features(stat_features)
@@ -687,4 +687,4 @@ if __name__ == '__main__':
     # print(spars)
     # plot_sparsity_change(spars)
 
-    plot_dist_dynamic("csarron/roberta-base-squad-v1", 200, 0.0005)
+    # plot_dist_dynamic("csarron/roberta-base-squad-v1", 200, 0.0005)
