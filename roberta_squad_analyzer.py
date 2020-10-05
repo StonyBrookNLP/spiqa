@@ -425,7 +425,7 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
             if scale == 'log':
                 bin_edges = 10**np.linspace(hist_x_start, hist_x_end, bin_step+1)
                 bin_edges[0] -= 10**(hist_x_start-1)
-                return pd.Series(bin_edges)
+                return bin_edges
             else:
                 return bin_step
         elif type(bin_step) is float:
@@ -433,9 +433,9 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
                 bin_edges = 10**np.append(np.arange(hist_x_start,
                                                     hist_x_end, bin_step), hist_x_end)
                 bin_edges[0] -= 10**(hist_x_start-1)
-                return pd.Series(bin_edges)
+                return bin_edges
             else:
-                return pd.Series(np.append(np.arange(0, 1.0, bin_step), 1.0))
+                return np.append(np.arange(0, 1.0, bin_step), 1.0)
         else:
             return None
 
@@ -446,7 +446,7 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
 
     if os.path.isfile(hist_file_path):
         print("loading histogram from ", hist_file_path)
-        with open(hist_file_path, "wb+") as hist_file:
+        with open(hist_file_path, "rb") as hist_file:
             atten_hist = np.load(hist_file)
             atten_bins = np.load(hist_file)
             all_max = np.load(hist_file)
@@ -465,7 +465,7 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
 
         associated_data = sum(associated_data, [])
         # DEBUG: sample 10 instances from debugging
-        # associated_data = random.sample(sum(associated_data, []), 10)
+        # associated_data = random.sample(associated_data, 5)
         input_lens = [len(i['context']+i['question']) for i in associated_data]
         print("QA string pair length: [{}, {}]".format(min(input_lens), max(input_lens)))
         pipeline_running_counter, fed_data_len = 0, len(associated_data)
@@ -502,14 +502,14 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
 
         # Normalization
         atten_hist = np.apply_along_axis(lambda a: a / np.sum(a), -1, atten_hist)
-        all_sparse_count /= all_count
+        all_sparse_count = all_sparse_count.astype(float) / all_count
         # save the histogram
-        with open(PARAM_PATH + "atten_hist.npy", "wb+") as hist_file:
-            np.save(hist_file, atten_hist)
-            np.save(hist_file, atten_bins)
-            np.save(hist_file, all_max)
-            np.save(hist_file, all_min)
-            np.save(hist_file, all_sparse_count)
+        with open(hist_file_path, "wb+") as hist_file:
+            np.save(hist_file, atten_hist, allow_pickle=False)
+            np.save(hist_file, atten_bins, allow_pickle=False)
+            np.save(hist_file, all_max, allow_pickle=False)
+            np.save(hist_file, all_min, allow_pickle=False)
+            np.save(hist_file, all_sparse_count, allow_pickle=False)
 
     # plot atten_hist
     atten_bar_width = [atten_bins[i] - atten_bins[i-1] for i in range(1, len(atten_bins))]
