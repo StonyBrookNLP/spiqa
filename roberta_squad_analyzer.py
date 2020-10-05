@@ -198,7 +198,7 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
     if sample_inputs > 100 or sample_inputs == 0:
         raise ValueError("the sample inputs should be (0, 100]")
     # read from file
-    input_type = "_sampled" if sample_inputs else "_all"
+    input_type = "_sampled" if sample_inputs > 0 else "_all"
     input_type += "_filtered" if filter_inputs else ""
     h_states_path, atten_path, score_path, att_stat_path = \
         (PARAM_PATH + i + input_type +
