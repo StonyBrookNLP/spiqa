@@ -1,3 +1,7 @@
+"""
+roberta squad analyzer: analyzer sparsity of the roberta on squad 
+"""
+
 from transformers import pipeline
 from transformers import AutoConfig, AutoTokenizer, AutoModelForQuestionAnswering
 from transformers.data.metrics.squad_metrics import *
@@ -9,7 +13,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import matplotlib.patches as mpatches
 
-import argparse
+import argparse as ag
 import os
 import random
 from subprocess import call
@@ -165,12 +169,14 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
                                                             res['max'].shape[1]))
 
         # check sparsity filter apply
-        if spars_threshold > 0.0:
-            att_mask = np.expand_dims(np.amax(prediction['attentions'], axis=-1) * spars_threshold, axis=-1)
-            sampled_data = prediction['attentions'] * (prediction['attentions'] <= att_mask)
-            if (sampled_data > 0.0).any():
-                print("sparsity check failed!")
-                exit()
+        # if spars_threshold > 0.0:
+        #     att_mask = np.expand_dims(
+        #         np.amax(prediction['attentions'], axis=-1) * spars_threshold, axis=-1)
+        #     sampled_data = prediction['attentions'] * \
+        #         (prediction['attentions'] <= att_mask)
+        #     if (sampled_data > 0.0).any():
+        #         print("sparsity check failed!")
+        #         exit()
 
         # screen_clear()
 
@@ -178,7 +184,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
     return res
 
 
-def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True, single_input=True, sample_inputs=-1, layer_aggregration='mean'):
+def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True, single_input=True, sample_inputs=-1, layer_aggregration='mean', spars_threshold=0.0):
     '''
     get the hidden state and attention from pipeline result. 
     The model_name should be a valid Huggingface transformer model. 
@@ -222,7 +228,7 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
     else:
         print("Extracting attentions from model...")
         predictions = run_qa_pipeline(
-            model_name, filter_inputs=filter_inputs, single_input=single_input, sample_inputs=sample_inputs, spars_threshold=0.01)
+            model_name, filter_inputs=filter_inputs, single_input=single_input, sample_inputs=sample_inputs, spars_threshold=spars_threshold)
 
         total_score, all_hidden_states, all_attentions, qa_pair_count, \
             all_max, all_min, all_mean, all_std, all_sparsity = \
@@ -335,7 +341,7 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
         elif type(bin_step) is float:
             if scale == 'log':
                 bin_edges = 10**np.append(
-                                np.arange(hist_x_start, hist_x_end, bin_step), hist_x_end)
+                    np.arange(hist_x_start, hist_x_end, bin_step), hist_x_end)
                 bin_edges[0] -= 10**(hist_x_start-1)
                 return pd.Series(bin_edges)
             else:
@@ -529,8 +535,8 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
             curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
             curr_ax.set_xscale('log')
             # curr_ax.set_yscale('log')
-            curr_ax.set_xlim([10 ** hist_x_start - 10 ** (hist_x_start-1), 
-                                10 ** hist_x_end])
+            curr_ax.set_xlim([10 ** hist_x_start - 10 ** (hist_x_start-1),
+                              10 ** hist_x_end])
 
         fig.suptitle("Histogram for layer {} per head {}".format(
             layer_idx, attached_title), fontsize=21, y=0.99)
@@ -578,7 +584,7 @@ def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True, laye
         plt.close(fig)
 
 
-def plot_sparsity_change(data):
+def plot_sparsity_change(data, attached_title=''):
     '''
     plot sparsity change for different sparsity dropout threshold
     '''
@@ -595,8 +601,8 @@ def plot_sparsity_change(data):
             curr_ax.set_ylim([0.0, 1.01])
             curr_ax.set_xlim(0.0, max(spars_threshold)+0.01)
 
-        fig.suptitle('Sparsity for Different Thresholds with Fixed Bar for Layer {}'.format(
-            layer_idx), fontsize=21, y=0.99)
+        fig.suptitle('Sparsity for Different Thresholds for Layer {} {}'.format(
+            layer_idx, attached_title), fontsize=21, y=0.99)
         fig.tight_layout()
         plt.savefig(RES_FIG_PATH+'spars_change_layer{}.png'.format(layer_idx), dpi=600)
         plt.clf()
@@ -617,14 +623,15 @@ def plot_sparsity_change(data):
     ax2 = ax1.twinx()
     ax2.set_ylabel('EM score')
     ax2.plot(spars_threshold, data['em']*100, color='C1', marker='s', markersize='4.5')
-    ax1.set_yticks(np.linspace(0.2, 1.0, 9))
-    ax1.set_ylim([0.2, 1.0])
-    ax2.set_yticks(np.linspace(20, 100, 9))
-    ax2.set_ylim([20, 100])
+    ax1.set_yticks(np.linspace(0.2, 1.1, 10))
+    ax1.set_ylim([0.2, 1.1])
+    ax2.set_yticks(np.linspace(20, 110, 10))
+    ax2.set_ylim([20, 110])
 
     ax2.set_xscale('log')
     ax2.set_xlim([0.0001, 0.2])
-    fig.suptitle('Sparsity and Accuracy vs. Sparsity Dropping Threshold')
+    fig.suptitle(
+        'Sparsity and Accuracy vs. Sparsity Dropping Threshold {}'.format(attached_title))
     fig.tight_layout()
     plt.grid(linestyle='--', alpha=0.5, color='grey')
     plt.legend(handles=patches, loc='upper left')
@@ -657,8 +664,15 @@ def plot_stat_features(stat_features, features_to_plot=['max', 'min', 'std']):
 
 
 if __name__ == '__main__':
+    arg_parser = ag.ArgumentParser(description=__doc__)
+    arg_parser.add_argument("-t", "--threshold", default=0.0,
+                            required=False, help="set sparsity threshold")
+    args = vars(arg_parser.parse_args())
+    spars_threshold = float(args['threshold'])
+    print(spars_threshold)
+
     em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = get_hstates_attens(
-        "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False, layer_aggregration='mean')
+        "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False, layer_aggregration='mean', spars_threshold=spars_threshold)
     em_str = 'EM={:.2f}'.format(em_score*100)
     # stat_features = get_stat_features({'max': att_max, 'min': att_min, 'mean': att_mean, 'std': att_std})
     # print(stat_features)
@@ -685,6 +699,6 @@ if __name__ == '__main__':
     # spars_threshold = ['0.0005', '0.001', '0.005', '0.01', '0.05', '0.1']
     # spars = get_sparsities(spars_threshold)
     # print(spars)
-    # plot_sparsity_change(spars)
+    # plot_sparsity_change(spars, attached_title='(dynamic threshold)')
 
     # plot_dist_dynamic("csarron/roberta-base-squad-v1", 200, 0.0005)

@@ -18,4 +18,4 @@
 *.csv
 
 # ignore params
-attention_params
+dropped_attention_params
