@@ -413,7 +413,7 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
         plt.close(fig)
 
 
-def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title=''):
+def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='', samples=-1):
     '''
     computing histogram on-the-fly without saving the attentions in the memory
     '''
@@ -446,7 +446,8 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
         else:
             return None
 
-    hist_file_path = PARAM_PATH + "atten_hist.npy"
+    file_type = "_sampled" if samples > 0 else "" 
+    hist_file_path = PARAM_PATH + "atten_hist{}.npy".format(file_type)
 
     atten_bins, atten_hist, all_score = get_bin_edges(bin_step, scale='log'), None, 0
     all_max, all_min, all_sparse_count, all_count = None, None, None, 0
@@ -471,8 +472,8 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
             associated_data.append(context_ques_pair)
 
         associated_data = sum(associated_data, [])
-        # DEBUG: sample 10 instances from debugging
-        # associated_data = random.sample(associated_data, 5)
+        if samples > 0 :
+            associated_data = random.sample(associated_data, samples)
         input_lens = [len(i['context']+i['question']) for i in associated_data]
         print("QA string pair length: [{}, {}]".format(min(input_lens), max(input_lens)))
         pipeline_running_counter, fed_data_len = 0, len(associated_data)
@@ -496,13 +497,18 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
             curr_sparse_count = np.apply_along_axis(
                 lambda a: (a < sparsity_bar).sum(), -1, flat_att)
 
-            atten_hist = curr_hist if atten_hist is None else np.add(
-                atten_hist, curr_hist)
+            if samples > 0:
+                atten_hist = [curr_hist] if atten_hist is None else atten_hist + [curr_hist]
+            else:
+                atten_hist = curr_hist if atten_hist is None else np.add(
+                    atten_hist, curr_hist)
             all_max = curr_max if all_max is None else np.maximum(all_max, curr_max)
             all_min = curr_min if all_min is None else np.minimum(all_min, curr_min)
             all_sparse_count = curr_sparse_count if all_sparse_count is None else np.add(
                 all_sparse_count, curr_sparse_count)
             all_count += flat_att.shape[-1]
+
+        if samples > 0: atten_hist = np.stack(atten_hist, axis=2)
 
         print("atten_hist shape:", atten_hist.shape)
         print("EM score", all_score / fed_data_len)
@@ -526,8 +532,14 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
         for head_idx, head in enumerate(layer):
             curr_ax = ax[int(head_idx/4), int(head_idx % 4)]
             curr_ax.set_xscale('log')
-            curr_ax.bar(atten_bins[:-1], head, atten_bar_width, color='C0')
-            curr_ax.step(atten_bins[:-1], np.cumsum(head), color='C3', linewidth=1)
+
+            if samples > 0:
+                for inst in head:
+                    curr_ax.step(atten_bins[:-1], inst, atten_bar_width, color='C0', linewidth=1, alpha=0.4)
+                    curr_ax.step(atten_bins[:-1], np.cumsum(inst), color='C3', linewidth=1, alpha=0.4)
+            else:
+                curr_ax.bar(atten_bins[:-1], head, atten_bar_width, color='C0')
+                curr_ax.step(atten_bins[:-1], np.cumsum(head), color='C3', linewidth=1)
 
             subplot_title = 'head_{}, max: {:.4f}, min: {:.4f}, spars: {:.4f}, sparsity_bar: {:.4f}'.format(
                 head_idx, all_max[layer_idx][head_idx], all_min[layer_idx][head_idx],
@@ -536,14 +548,14 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
             curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
             curr_ax.set_xscale('log')
             # curr_ax.set_yscale('log')
-            curr_ax.set_ylim([0, 0.05])
+            curr_ax.set_ylim([0, 1])
             curr_ax.set_xlim([10 ** hist_x_start - 10 ** (hist_x_start-1),
                               10 ** hist_x_end])
 
         fig.suptitle("Histogram for layer {} per head {}".format(
             layer_idx, attached_title), fontsize=21, y=0.99)
         fig.tight_layout()
-        plt.savefig(RES_FIG_PATH+'hist_layer_otf_{}.png'.format(layer_idx), dpi=600)
+        plt.savefig(RES_FIG_PATH+'hist_layer_otf_{}{}.png'.format(layer_idx, file_type), dpi=600)
         plt.clf()
         plt.close(fig)
 
@@ -701,13 +713,16 @@ if __name__ == '__main__':
                             required=False, help="compute sparsity")
     arg_parser.add_argument("-o", "--otf_distribution", default=False, action='store_true',
                             required=False, help='print histogram without saving aggregrated params')
+    arg_parser.add_argument("-sa", "--samples", default=-1, 
+                            required=False, help="number of samples for distribution")
 
     args = vars(arg_parser.parse_args())
     spars_threshold = float(args['threshold'])
+    samples = int(args['samples'])
 
     if args['distribution']:
         em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = get_hstates_attens(
-            "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False, layer_aggregration='mean', spars_threshold=spars_threshold)
+            "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False, layer_aggregration='mean', spars_threshold=spars_threshold, sample_inputs=samples)
         em_str = 'EM={:.2f}'.format(em_score*100)
         stat_features = get_stat_features(
             {'max': att_max, 'min': att_min, 'mean': att_mean, 'std': att_std})
@@ -742,4 +757,4 @@ if __name__ == '__main__':
         plot_sparsity_change(spars, attached_title='(dynamic threshold)')
 
     if args['otf_distribution']:
-        plot_dist_dynamic("csarron/roberta-base-squad-v1", 200, 0.0005)
+        plot_dist_dynamic("csarron/roberta-base-squad-v1", 200, 0.0005, samples=samples)
