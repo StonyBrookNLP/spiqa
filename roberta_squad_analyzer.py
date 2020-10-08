@@ -413,13 +413,14 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
         plt.close(fig)
 
 
-def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='', samples=-1):
+def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='', samples=-1, scale='log'):
     '''
     computing histogram on-the-fly without saving the attentions in the memory
     '''
     # set histogram x axis starting point here
     offset = 1e-8
     hist_x_start, hist_x_end = log(offset, 10), log(1+offset, 10)
+    if scale == 'linear': offset = 0.0
     qa_pipeline = pipeline(
         "question-answering",
         model=model_name,
@@ -427,7 +428,7 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
         device=0
     )
 
-    def get_bin_edges(bin_step, scale='normal'):
+    def get_bin_edges(bin_step):
         if type(bin_step) is int:
             if scale == 'log':
                 bin_edges = 10**np.linspace(hist_x_start, hist_x_end, bin_step+1)
@@ -449,7 +450,7 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
     file_type = "_sampled" if samples > 0 else "" 
     hist_file_path = PARAM_PATH + "atten_hist{}.npy".format(file_type)
 
-    atten_bins, atten_hist, all_score = get_bin_edges(bin_step, scale='log'), None, 0
+    atten_bins, atten_hist, all_score = get_bin_edges(bin_step), None, 0
     all_max, all_min, all_sparse_count, all_count = None, None, None, 0
 
     if os.path.isfile(hist_file_path):
@@ -546,11 +547,14 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
                 all_sparse_count[layer_idx][head_idx], sparsity_bar)
             curr_ax.set_title('\n'.join(wrap(subplot_title, 38)))
             curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
-            curr_ax.set_xscale('log')
+            curr_ax.set_xscale(scale)
             # curr_ax.set_yscale('log')
             curr_ax.set_ylim([0, 1])
-            curr_ax.set_xlim([10 ** hist_x_start - 10 ** (hist_x_start-1),
-                              10 ** hist_x_end])
+            if scale == 'log':
+                curr_ax.set_xlim([10 ** hist_x_start - 10 ** (hist_x_start-1),
+                                10 ** hist_x_end])
+            else:
+                curr_ax.set_xlim([0, 0.02])
 
         fig.suptitle("Histogram for layer {} per head {}".format(
             layer_idx, attached_title), fontsize=21, y=0.99)
@@ -757,4 +761,4 @@ if __name__ == '__main__':
         plot_sparsity_change(spars, attached_title='(dynamic threshold)')
 
     if args['otf_distribution']:
-        plot_dist_dynamic("csarron/roberta-base-squad-v1", 200, 0.0005, samples=samples)
+        plot_dist_dynamic("csarron/roberta-base-squad-v1", 0.0001, 0.0005, samples=samples, scale='linear')
