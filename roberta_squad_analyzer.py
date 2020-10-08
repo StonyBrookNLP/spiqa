@@ -265,13 +265,14 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
     return total_score, all_hidden_states, all_attentions, all_max, all_min, all_mean, all_std, all_sparsity
 
 
-def get_sparsities(threshold_list: list, sparsity_bar=0.025, layer_aggregration='mean'):
+def get_sparsities(params_path: str, sparsity_bar=0.025, layer_aggregration='mean'):
     '''
     extract sparsities for a fixed sparsity bar from all parameters with different threshold.
     '''
-    params_path_list = [FILT_PARAM_PATH +
-                        i.replace('.', '_') + "/" for i in threshold_list]
+    params_path_list = os.listdir(params_path)
+    threshold_list = [i.replace('_', '.') for i in params_path_list]
     sparsity_table = pd.DataFrame(index=[i for i in threshold_list])
+    params_path_list = [params_path + '/' + i + '/' for i in params_path_list]
 
     for threshold, params in zip(threshold_list, params_path_list):
         # read from file
@@ -535,6 +536,7 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
             curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
             curr_ax.set_xscale('log')
             # curr_ax.set_yscale('log')
+            curr_ax.set_ylim([0, 0.05])
             curr_ax.set_xlim([10 ** hist_x_start - 10 ** (hist_x_start-1),
                               10 ** hist_x_end])
 
@@ -629,13 +631,37 @@ def plot_sparsity_change(data, attached_title=''):
     ax2.set_ylim([20, 110])
 
     ax2.set_xscale('log')
-    ax2.set_xlim([0.0001, 0.2])
+    ax2.set_xlim([0.0001, 0.6])
     fig.suptitle(
         'Sparsity and Accuracy vs. Sparsity Dropping Threshold {}'.format(attached_title))
     fig.tight_layout()
     plt.grid(linestyle='--', alpha=0.5, color='grey')
     plt.legend(handles=patches, loc='upper left')
     plt.savefig(RES_FIG_PATH+'sparse_accu.png', dpi=600)
+    plt.close(fig)
+
+
+def plot_em_sparsity(sparsity_data: dict, attached_title=''):
+    # plot em vs. sparsity
+    fig, ax = plt.subplots()
+    fig.set_size_inches(8, 6)
+    patches = []
+
+    ax.set_xlabel("sparisty")
+    ax.set_ylabel("EM score")
+
+    for idx, (data_label, data) in enumerate(sparsity_data.items()):
+        patches.append(mpatches.Patch(color='C{}'.format(idx), label=data_label))
+        ax.plot(data['all'], data['em']*100,
+                color='C{}'.format(idx), marker='s', markersize=4.5)
+
+    ax.set_ylim([30, 90])
+    fig.suptitle(
+        'Accuracy vs. Sparsity {}'.format(attached_title))
+    fig.tight_layout()
+    plt.legend(handles=patches, loc='upper left')
+    plt.grid(linestyle='--', alpha=0.5, color='grey')
+    plt.savefig(RES_FIG_PATH+'em_vs_sparse.png', dpi=600)
     plt.close(fig)
 
 
@@ -667,38 +693,53 @@ if __name__ == '__main__':
     arg_parser = ag.ArgumentParser(description=__doc__)
     arg_parser.add_argument("-t", "--threshold", default=0.0,
                             required=False, help="set sparsity threshold")
+    arg_parser.add_argument("-d", "--distribution", default=False, action='store_true', 
+                            required=False, help="print histogram")
+    arg_parser.add_argument("-m", "--heatmap", default=False, action="store_true",
+                            required=False, help="print heatmap")
+    arg_parser.add_argument("-s", "--sparsity", default=False, action='store_true', 
+                            required=False, help="compute sparsity")
+    arg_parser.add_argument("-o", "--otf_distribution", default=False, action='store_true',
+                            required=False, help='print histogram without saving aggregrated params')
+
     args = vars(arg_parser.parse_args())
     spars_threshold = float(args['threshold'])
-    print(spars_threshold)
 
-    em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = get_hstates_attens(
-        "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False, layer_aggregration='mean', spars_threshold=spars_threshold)
-    em_str = 'EM={:.2f}'.format(em_score*100)
-    # stat_features = get_stat_features({'max': att_max, 'min': att_min, 'mean': att_mean, 'std': att_std})
-    # print(stat_features)
-    # plot_stat_features(stat_features)
-    # stat_features.to_csv('stat_features_unfiltered.csv', sep=',')
+    if args['distribution']:
+        em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = get_hstates_attens(
+            "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False, layer_aggregration='mean', spars_threshold=spars_threshold)
+        em_str = 'EM={:.2f}'.format(em_score*100)
+        stat_features = get_stat_features(
+            {'max': att_max, 'min': att_min, 'mean': att_mean, 'std': att_std})
+        print(stat_features)
+        plot_stat_features(stat_features)
+        stat_features.to_csv('stat_features_unfiltered.csv', sep=',')
 
-    # # plot histogram for all layers and all heads
-    # plot_dist(attens, bin_step=60, sparsity_bar=0.0005,
-    #           layer_aggregration='None', attached_title=em_str)
-    # # plot histogram for a certain head in a certain layer
-    # plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
-    #           single_head_idx=(0, 0), attached_title=em_str)
-    # plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
-    #           single_head_idx=(0, 9), attached_title=em_str)
-    # plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
-    #           single_head_idx=(0, 11), attached_title=em_str)
+        # plot histogram for all layers and all heads
+        plot_dist(attens, bin_step=60, sparsity_bar=0.0005,
+                  layer_aggregration='None', attached_title=em_str)
+        # plot histogram for a certain head in a certain layer
+        plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
+                  single_head_idx=(0, 0), attached_title=em_str)
+        plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
+                  single_head_idx=(0, 9), attached_title=em_str)
+        plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
+                  single_head_idx=(0, 11), attached_title=em_str)
 
-    # # plot heatmaps
-    # plot_heatmap(attens, sparsity_bar=0.0005, binarize=False, attached_title=em_str)
-    # plot_heatmap(attens, sparsity_bar=0.0005, binarize=True, attached_title=em_str)
-    # plot_heatmap(attens, sparsity_bar=0.0005, binarize=False,
-    #              auto_scale=True, attached_title=em_str)
-    # # compute sparsity
-    # spars_threshold = ['0.0005', '0.001', '0.005', '0.01', '0.05', '0.1']
-    # spars = get_sparsities(spars_threshold)
-    # print(spars)
-    # plot_sparsity_change(spars, attached_title='(dynamic threshold)')
+    if args['heatmap']:
+        # plot heatmaps
+        plot_heatmap(attens, sparsity_bar=0.0005, binarize=False, attached_title=em_str)
+        plot_heatmap(attens, sparsity_bar=0.0005, binarize=True, attached_title=em_str)
+        plot_heatmap(attens, sparsity_bar=0.0005, binarize=False,
+                    auto_scale=True, attached_title=em_str)
 
-    # plot_dist_dynamic("csarron/roberta-base-squad-v1", 200, 0.0005)
+    if args['sparsity']:
+        # compute sparsity
+        stat_filtered_spars = get_sparsities('filtered_params/static')
+        dyna_filtered_spars = get_sparsities('filtered_params/dyna')
+        print(stat_filtered_spars, dyna_filtered_spars)
+        plot_em_sparsity({'static':stat_filtered_spars, 'dynamic': dyna_filtered_spars})
+        plot_sparsity_change(spars, attached_title='(dynamic threshold)')
+
+    if args['otf_distribution']:
+        plot_dist_dynamic("csarron/roberta-base-squad-v1", 200, 0.0005)
