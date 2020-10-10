@@ -420,7 +420,8 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
     # set histogram x axis starting point here
     offset = 1e-8
     hist_x_start, hist_x_end = log(offset, 10), log(1+offset, 10)
-    if scale == 'linear': offset = 0.0
+    if scale == 'linear':
+        offset = 0.0
     qa_pipeline = pipeline(
         "question-answering",
         model=model_name,
@@ -447,7 +448,7 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
         else:
             return None
 
-    file_type = "_sampled" if samples > 0 else "" 
+    file_type = "_sampled" if samples > 0 else ""
     hist_file_path = PARAM_PATH + "atten_hist{}.npy".format(file_type)
 
     atten_bins, atten_hist, all_score = get_bin_edges(bin_step), None, 0
@@ -473,7 +474,7 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
             associated_data.append(context_ques_pair)
 
         associated_data = sum(associated_data, [])
-        if samples > 0 :
+        if samples > 0:
             associated_data = random.sample(associated_data, samples)
         input_lens = [len(i['context']+i['question']) for i in associated_data]
         print("QA string pair length: [{}, {}]".format(min(input_lens), max(input_lens)))
@@ -496,27 +497,36 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
                 a+offset, atten_bins)[0], -1, flat_att)
             curr_max, curr_min = np.amax(flat_att, axis=-1), np.amin(flat_att, axis=-1)
             curr_sparse_count = np.apply_along_axis(
-                lambda a: (a < sparsity_bar).sum(), -1, flat_att)
+                lambda a: (a <= sparsity_bar).sum(), -1, flat_att)
 
             if samples > 0:
-                atten_hist = [curr_hist] if atten_hist is None else atten_hist + [curr_hist]
+                atten_hist = [
+                    curr_hist] if atten_hist is None else atten_hist + [curr_hist]
+                curr_sparse_count = curr_sparse_count.astype(float) / flat_att.shape[-1]
+                all_sparse_count = [
+                    curr_sparse_count] if all_sparse_count is None else all_sparse_count + [curr_sparse_count]
             else:
                 atten_hist = curr_hist if atten_hist is None else np.add(
                     atten_hist, curr_hist)
+                all_sparse_count = curr_sparse_count if all_sparse_count is None else np.add(
+                    all_sparse_count, curr_sparse_count)
+
             all_max = curr_max if all_max is None else np.maximum(all_max, curr_max)
             all_min = curr_min if all_min is None else np.minimum(all_min, curr_min)
-            all_sparse_count = curr_sparse_count if all_sparse_count is None else np.add(
-                all_sparse_count, curr_sparse_count)
             all_count += flat_att.shape[-1]
 
-        if samples > 0: atten_hist = np.stack(atten_hist, axis=2)
+        if samples > 0:
+            atten_hist = np.stack(atten_hist, axis=2)
+            all_sparse_count = np.stack(all_sparse_count, axis=2)
+        else:
+            all_sparse_count = all_sparse_count.astype(float) / all_count
 
         print("atten_hist shape:", atten_hist.shape)
+        print("sparsity shape:", all_sparse_count.shape)
         print("EM score", all_score / fed_data_len)
 
         # Normalization
         atten_hist = np.apply_along_axis(lambda a: a / np.sum(a), -1, atten_hist)
-        all_sparse_count = all_sparse_count.astype(float) / all_count
         # save the histogram
         with open(hist_file_path, "wb+") as hist_file:
             np.save(hist_file, atten_hist, allow_pickle=False)
@@ -532,19 +542,23 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
         fig, ax = plt.subplots(3, 4, figsize=(21, 12))
         for head_idx, head in enumerate(layer):
             curr_ax = ax[int(head_idx/4), int(head_idx % 4)]
-            curr_ax.set_xscale('log')
-
             if samples > 0:
                 for inst in head:
-                    curr_ax.step(atten_bins[:-1], inst, atten_bar_width, color='C0', linewidth=1, alpha=0.4)
-                    curr_ax.step(atten_bins[:-1], np.cumsum(inst), color='C3', linewidth=1, alpha=0.4)
+                    curr_ax.step(atten_bins[:-1], inst, atten_bar_width,
+                                 color='C0', linewidth=1, alpha=0.4, where='post')
+                    curr_ax.step(atten_bins[:-1], np.cumsum(inst),
+                                 color='C3', linewidth=1, alpha=0.4, where='post')
             else:
                 curr_ax.bar(atten_bins[:-1], head, atten_bar_width, color='C0')
-                curr_ax.step(atten_bins[:-1], np.cumsum(head), color='C3', linewidth=1)
+                curr_ax.step(atten_bins[:-1], np.cumsum(head),
+                             color='C3', linewidth=1, where='post')
 
-            subplot_title = 'head_{}, max: {:.4f}, min: {:.4f}, spars: {:.4f}, sparsity_bar: {:.4f}'.format(
-                head_idx, all_max[layer_idx][head_idx], all_min[layer_idx][head_idx],
-                all_sparse_count[layer_idx][head_idx], sparsity_bar)
+            subplot_title = 'head_{}, max: {:.4f}, min: {:.4f}'.format(
+                head_idx, all_max[layer_idx][head_idx], all_min[layer_idx][head_idx])
+            if samples < 0:
+                subplot_title += ", spars: {:.4f}, sparsity_bar: {:.4f}".format(
+                    all_sparse_count[layer_idx][head_idx], sparsity_bar)
+
             curr_ax.set_title('\n'.join(wrap(subplot_title, 38)))
             curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
             curr_ax.set_xscale(scale)
@@ -552,16 +566,42 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
             curr_ax.set_ylim([0, 1])
             if scale == 'log':
                 curr_ax.set_xlim([10 ** hist_x_start - 10 ** (hist_x_start-1),
-                                10 ** hist_x_end])
+                                  10 ** hist_x_end])
             else:
                 curr_ax.set_xlim([0, 0.02])
 
         fig.suptitle("Histogram for layer {} per head {}".format(
             layer_idx, attached_title), fontsize=21, y=0.99)
         fig.tight_layout()
-        plt.savefig(RES_FIG_PATH+'hist_layer_otf_{}{}.png'.format(layer_idx, file_type), dpi=600)
+        plt.savefig(
+            RES_FIG_PATH+'hist_layer_otf_{}{}.png'.format(layer_idx, file_type), dpi=600)
         plt.clf()
         plt.close(fig)
+
+    # plot sparsity histogram when sampling:
+    if samples > 0:
+        for layer_idx, layer in enumerate(atten_hist):
+            fig, ax = plt.subplots(3, 4, figsize=(21, 12))
+            for head_idx, head in enumerate(layer):
+                curr_ax = ax[int(head_idx/4), int(head_idx % 4)]
+                head_sparsity = all_sparse_count[layer_idx][head_idx]
+                curr_ax.hist(head_sparsity, bins=100, range=(0, 1.0), weights=(np.ones_like(head_sparsity)/len(head_sparsity)))
+
+                subplot_title = 'head_{}, max: {:.4f}, min: {:.4f}'.format(
+                    head_idx, all_max[layer_idx][head_idx], all_min[layer_idx][head_idx])
+
+                curr_ax.set_title('\n'.join(wrap(subplot_title, 38)))
+                curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
+                curr_ax.set_ylim([0, 1])
+                curr_ax.set_xlim([0, 1])
+
+            fig.suptitle("Sparsity Histogram for layer {} per head {}, with sparsity bar {:.4f}".format(
+                layer_idx, attached_title, sparsity_bar), fontsize=21, y=0.99)
+            fig.tight_layout()
+            plt.savefig(
+                RES_FIG_PATH+'spars_hist_layer_otf_{}{}.png'.format(layer_idx, file_type), dpi=600)
+            plt.clf()
+            plt.close(fig)
 
 
 def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True, layer_aggregration='mean', attached_title=''):
@@ -709,15 +749,15 @@ if __name__ == '__main__':
     arg_parser = ag.ArgumentParser(description=__doc__)
     arg_parser.add_argument("-t", "--threshold", default=0.0,
                             required=False, help="set sparsity threshold")
-    arg_parser.add_argument("-d", "--distribution", default=False, action='store_true', 
+    arg_parser.add_argument("-d", "--distribution", default=False, action='store_true',
                             required=False, help="print histogram")
     arg_parser.add_argument("-m", "--heatmap", default=False, action="store_true",
                             required=False, help="print heatmap")
-    arg_parser.add_argument("-s", "--sparsity", default=False, action='store_true', 
+    arg_parser.add_argument("-s", "--sparsity", default=False, action='store_true',
                             required=False, help="compute sparsity")
     arg_parser.add_argument("-o", "--otf_distribution", default=False, action='store_true',
                             required=False, help='print histogram without saving aggregrated params')
-    arg_parser.add_argument("-sa", "--samples", default=-1, 
+    arg_parser.add_argument("-sa", "--samples", default=-1,
                             required=False, help="number of samples for distribution")
 
     args = vars(arg_parser.parse_args())
@@ -725,8 +765,9 @@ if __name__ == '__main__':
     samples = int(args['samples'])
 
     if args['distribution']:
-        em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = get_hstates_attens(
-            "csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, single_input=False, layer_aggregration='mean', spars_threshold=spars_threshold, sample_inputs=samples)
+        em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \
+            get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, 
+            single_input=False, layer_aggregration='mean', spars_threshold=spars_threshold, sample_inputs=samples)
         em_str = 'EM={:.2f}'.format(em_score*100)
         stat_features = get_stat_features(
             {'max': att_max, 'min': att_min, 'mean': att_mean, 'std': att_std})
@@ -750,15 +791,15 @@ if __name__ == '__main__':
         plot_heatmap(attens, sparsity_bar=0.0005, binarize=False, attached_title=em_str)
         plot_heatmap(attens, sparsity_bar=0.0005, binarize=True, attached_title=em_str)
         plot_heatmap(attens, sparsity_bar=0.0005, binarize=False,
-                    auto_scale=True, attached_title=em_str)
+                     auto_scale=True, attached_title=em_str)
 
     if args['sparsity']:
         # compute sparsity
         stat_filtered_spars = get_sparsities('filtered_params/static')
         dyna_filtered_spars = get_sparsities('filtered_params/dyna')
         print(stat_filtered_spars, dyna_filtered_spars)
-        plot_em_sparsity({'static':stat_filtered_spars, 'dynamic': dyna_filtered_spars})
+        plot_em_sparsity({'static': stat_filtered_spars, 'dynamic': dyna_filtered_spars})
         plot_sparsity_change(spars, attached_title='(dynamic threshold)')
 
     if args['otf_distribution']:
-        plot_dist_dynamic("csarron/roberta-base-squad-v1", 0.0001, 0.0005, samples=samples, scale='linear')
+        plot_dist_dynamic("csarron/roberta-base-squad-v1", 100, 0.0, samples=samples, scale='log')
