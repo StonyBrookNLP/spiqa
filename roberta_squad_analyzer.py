@@ -413,10 +413,14 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
         plt.close(fig)
 
 
-def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='', samples=-1, scale='log'):
+def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='', samples=-1, scale='log', sample_on_token=False):
     '''
     computing histogram on-the-fly without saving the attentions in the memory
     '''
+    # argument sanity check
+    if samples < 0 and sample_on_token:
+        raise ValueError("samples must be > 0 when sample_on_token is True")
+
     # set histogram x axis starting point here
     offset = 1e-8
     hist_x_start, hist_x_end = log(offset, 10), log(1+offset, 10)
@@ -492,13 +496,18 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
                            for gold_ans in qa_pair['answers'])
             flat_att = np.concatenate(
                 np.array_split(prediction['attentions'], prediction['attentions'].shape[1], axis=1), axis=-1)
-            flat_att = np.squeeze(flat_att.reshape(*flat_att.shape[:3], -1))
+            flat_att = np.squeeze(flat_att)
+            if not sample_on_token:
+                flat_att = flat_att.reshape(*flat_att.shape[:2], -1)
             print("flat_att shape:", flat_att.shape)
 
             all_score += em_score
             curr_hist = np.apply_along_axis(lambda a: np.histogram(
                 a+offset, atten_bins)[0], -1, flat_att)
-            curr_max, curr_min = np.amax(flat_att, axis=-1), np.amin(flat_att, axis=-1)
+            if sample_on_token: 
+                curr_max, curr_min = np.amax(flat_att, axis=(-2, -1)), np.amin(flat_att, axis=(-2, -1))
+            else:
+                curr_max, curr_min = np.amax(flat_att, axis=-1), np.amin(flat_att, axis=-1)
             curr_sparse_count = np.apply_along_axis(
                 lambda a: (a <= sparsity_bar).sum(), -1, flat_att)
 
@@ -517,8 +526,11 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
             all_max = curr_max if all_max is None else np.maximum(all_max, curr_max)
             all_min = curr_min if all_min is None else np.minimum(all_min, curr_min)
             all_count += flat_att.shape[-1]
-
-        if samples > 0:
+        
+        if samples > 0 and sample_on_token:
+            atten_hist = np.concatenate(atten_hist, axis=2)
+            all_sparse_count = np.concatenate(all_sparse_count, axis=2)
+        elif samples > 0:
             atten_hist = np.stack(atten_hist, axis=2)
             all_sparse_count = np.stack(all_sparse_count, axis=2)
         else:
@@ -546,11 +558,12 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
         for head_idx, head in enumerate(layer):
             curr_ax = ax[int(head_idx/4), int(head_idx % 4)]
             if samples > 0:
+                alpha_val = 0.01 if head.shape[0] > 500 else 0.1
                 for inst in head:
                     curr_ax.step(atten_bins[:-1], inst, atten_bar_width,
-                                 color='C0', linewidth=1, alpha=0.4, where='post')
+                                 color='C0', linewidth=1, alpha=alpha_val, where='post')
                     curr_ax.step(atten_bins[:-1], np.cumsum(inst),
-                                 color='C3', linewidth=1, alpha=0.4, where='post')
+                                 color='C3', linewidth=1, alpha=alpha_val, where='post')
             else:
                 curr_ax.bar(atten_bins[:-1], head, atten_bar_width, color='C0')
                 curr_ax.step(atten_bins[:-1], np.cumsum(head),
@@ -805,4 +818,4 @@ if __name__ == '__main__':
         plot_sparsity_change(spars, attached_title='(dynamic threshold)')
 
     if args['otf_distribution']:
-        plot_dist_dynamic("csarron/roberta-base-squad-v1", 100, 0.0, samples=samples, scale='log')
+        plot_dist_dynamic("csarron/roberta-base-squad-v1", 100, 0.0, samples=samples, scale='log', sample_on_token=True, attached_title='(per token)')
