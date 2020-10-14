@@ -508,8 +508,10 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
                 curr_max, curr_min = np.amax(flat_att, axis=(-2, -1)), np.amin(flat_att, axis=(-2, -1))
             else:
                 curr_max, curr_min = np.amax(flat_att, axis=-1), np.amin(flat_att, axis=-1)
-            curr_sparse_count = np.apply_along_axis(
-                lambda a: (a <= sparsity_bar).sum(), -1, flat_att)
+            if sparsity_bar == 0.0:
+                curr_sparse_count = np.apply_along_axis(lambda a: (flat_att.shape[-1] - np.count_nonzero(a), -1, flat_att))
+            else:
+                curr_sparse_count = np.apply_along_axis(lambda a: ((a < sparsity_bar).sum(), -1, flat_att))
 
             if samples > 0:
                 atten_hist = [
@@ -558,12 +560,16 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
         for head_idx, head in enumerate(layer):
             curr_ax = ax[int(head_idx/4), int(head_idx % 4)]
             if samples > 0:
-                alpha_val = 0.01 if head.shape[0] > 500 else 0.1
+                alpha_val = 0.01
                 for inst in head:
-                    curr_ax.step(atten_bins[:-1], inst, atten_bar_width,
-                                 color='C0', linewidth=1, alpha=alpha_val, where='post')
-                    curr_ax.step(atten_bins[:-1], np.cumsum(inst),
-                                 color='C3', linewidth=1, alpha=alpha_val, where='post')
+                    # curr_ax.step(atten_bins[:-1], inst, atten_bar_width,
+                    #              color='C0', linewidth=1, alpha=alpha_val, where='post')
+                    # curr_ax.step(atten_bins[:-1], np.cumsum(inst),
+                    #              color='C3', linewidth=1, alpha=alpha_val, where='post')
+                    curr_ax.plot(atten_bins[:-1], inst, atten_bar_width,
+                                 color='C0', linewidth=0.5, alpha=alpha_val)
+                    curr_ax.plot(atten_bins[:-1], np.cumsum(inst),
+                                 color='C3', linewidth=0.5, alpha=alpha_val)
             else:
                 curr_ax.bar(atten_bins[:-1], head, atten_bar_width, color='C0')
                 curr_ax.step(atten_bins[:-1], np.cumsum(head),
@@ -602,6 +608,8 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
                 curr_ax = ax[int(head_idx/4), int(head_idx % 4)]
                 head_sparsity = all_sparse_count[layer_idx][head_idx]
                 curr_ax.hist(head_sparsity, bins=100, range=(0, 1.0), weights=(np.ones_like(head_sparsity)/len(head_sparsity)))
+                curr_ax.hist(head_sparsity, bins=100, range=(0, 1.0), weights=(np.ones_like(head_sparsity)/len(head_sparsity)), 
+                    cumulative=True, histtype='step', linewidth=1, color='C3')
 
                 subplot_title = 'head_{}, max: {:.4f}, min: {:.4f}'.format(
                     head_idx, all_max[layer_idx][head_idx], all_min[layer_idx][head_idx])
@@ -818,4 +826,4 @@ if __name__ == '__main__':
         plot_sparsity_change(spars, attached_title='(dynamic threshold)')
 
     if args['otf_distribution']:
-        plot_dist_dynamic("csarron/roberta-base-squad-v1", 100, 0.0, samples=samples, scale='log', sample_on_token=True, attached_title='(per token)')
+        plot_dist_dynamic("csarron/roberta-base-squad-v1", 100, 0.0, samples=samples, scale='log', sample_on_token=False, attached_title='(per token)')
