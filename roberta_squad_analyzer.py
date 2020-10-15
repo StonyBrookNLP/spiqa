@@ -481,8 +481,7 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
         if samples > 0:
             # fixed random seed to select same subsets of the instances every time for comparison
             random.seed(123)
-            rand_index_lst = [random.randint(0, len(associated_data)) for i in range(samples)]
-            associated_data = [associated_data[i] for i in rand_index_lst]
+            associated_data = random.sample(associated_data, samples)
         input_lens = [len(i['context']+i['question']) for i in associated_data]
         print("QA string pair length: [{}, {}]".format(min(input_lens), max(input_lens)))
         pipeline_running_counter, fed_data_len = 0, len(associated_data)
@@ -826,4 +825,4 @@ if __name__ == '__main__':
         plot_sparsity_change(spars, attached_title='(dynamic threshold)')
 
     if args['otf_distribution']:
-        plot_dist_dynamic("csarron/roberta-base-squad-v1", 100, 0.0, samples=samples, scale='log', sample_on_token=False, attached_title='(per token)')
+        plot_dist_dynamic("csarron/roberta-base-squad-v1", 100, 0.0, samples=samples, scale='log', sample_on_token=False, attached_title='')
