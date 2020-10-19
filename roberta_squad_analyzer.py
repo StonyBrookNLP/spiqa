@@ -15,7 +15,9 @@ import matplotlib.patches as mpatches
 
 import argparse as ag
 import os
+import sys
 import random
+import functools
 from subprocess import call
 from math import isnan, fsum, log
 from textwrap import wrap
@@ -27,7 +29,8 @@ RES_FIG_PATH = "./res_fig/"
 PARAM_PATH = "./params/"
 DATA_PATH = "./data/"
 FILT_PARAM_PATH = "./filtered_params/"
-
+MAX_SEQ_LEN = 320
+ATT_SIZE = [12, 12, MAX_SEQ_LEN, MAX_SEQ_LEN]
 
 def screen_clear():
     _ = call('clear' if os.name == 'posix' else 'cls', shell=True)
@@ -110,76 +113,66 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
         single_associated_data = [random.choice(associated_data)]
         fed_data = single_associated_data if single_input else fed_data
 
-    res, pipeline_running_counter, overlap_inst_counter, fed_data_len = None, 0, 0, len(
-        fed_data)
+    res, pipeline_running_counter, fed_data_len = None, 0, len(fed_data)
+    total_elem_count = 0
     print("Among all inputs {}/{} are selected.".format(fed_data_len, len(associated_data)))
     # run the prediction
     for qa_pair in fed_data:
         print("running pipeline iter {}/{}...".format(pipeline_running_counter, fed_data_len))
         prediction = qa_pipeline(
-            {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=320, spars_threshold=spars_threshold)
+            {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=MAX_SEQ_LEN, spars_threshold=spars_threshold)
         em_score = max(compute_exact(prediction['answer'], gold_ans)
                        for gold_ans in qa_pair['answers'])
         att_array = prediction['attentions']
 
         # aggregrate attention and hidden states
-        flat_att = att_array.reshape(*att_array.shape[:3], -1)
+        # MARK: I am only getting values that are zero for the sparsity here. No specific sparsity bar.
+        def get_spars(x, axis): return np.count_nonzero(x == 0.0, axis=axis)
+        def agg_func(f): return np.stack([f(i, axis=(-2, -1)) for i in att_array], axis=0)
+        def add_func(f): return np.sum([f(i, axis=(-2, -1)) for i in att_array], axis=0)
         if res is None:
-            res = {'score': em_score, 'hidden_states': prediction['hidden_states'], 'attentions': att_array,
-                   'max': np.amax(flat_att, axis=-1), 'min': np.amin(flat_att, axis=-1), 'mean': np.mean(flat_att, axis=-1),
-                   'std': np.std(flat_att, axis=-1), 'sparsity': np.count_nonzero(flat_att == 0.0, axis=-1) / flat_att.shape[-1]}
+            res = {'score': em_score, 'hidden_states': prediction['hidden_states'],
+                   'max': agg_func(np.amax), 'min': agg_func(np.amin), 'mean': agg_func(np.mean),
+                   'std': agg_func(np.std), 'sparsity': add_func(get_spars)}
+            res['attentions'] = [] if sample_inputs > 0 else np.zeros(ATT_SIZE)
         else:
             res['score'] = (res['score'] + em_score)
-            res['max'] = np.concatenate((res['max'], np.amax(flat_att, axis=-1)), axis=1)
-            res['min'] = np.concatenate((res['min'], np.amin(flat_att, axis=-1)), axis=1)
-            res['mean'] = np.concatenate(
-                (res['mean'], np.mean(flat_att, axis=-1)), axis=1)
-            res['std'] = np.concatenate((res['std'], np.std(flat_att, axis=-1)), axis=1)
-            res['sparsity'] = np.concatenate((res['sparsity'], np.count_nonzero(
-                flat_att == 0.0, axis=-1) / flat_att.shape[-1]), axis=1)
+            res['max'] = np.concatenate((res['max'], agg_func(np.amax)), axis=0)
+            res['min'] = np.concatenate((res['min'], agg_func(np.amin)), axis=0)
+            res['mean'] = np.concatenate((res['mean'], agg_func(np.mean)), axis=0)
+            res['std'] = np.concatenate((res['std'], agg_func(np.std)), axis=0)
+            res['sparsity'] = np.add(res['sparsity'], add_func(get_spars))
 
             for layer_idx, (res_layer, pred_layer) in enumerate(zip(res['hidden_states'], prediction['hidden_states'])):
                 res['hidden_states'][layer_idx][0] = np.add(res_layer[0], pred_layer[0])
-            if sample_inputs > 0:
-                # just concat all attention across all instances
-                # concate the last axis to save one time of reshapping for hist plot
-                if prediction['attentions'].shape[1] > 1:
-                    overlap_inst_counter += prediction['attentions'].shape[1]
-                res['attentions'] = np.concatenate(
-                    ([res['attentions']] + np.array_split(prediction['attentions'], prediction['attentions'].shape[1], axis=1)), axis=-1)
-            else:
+        
+        # collect attentions
+        if sample_inputs > 0:
+            res['attentions'] += att_array
+        else:
+            for att in att_array:
+                padded_att = np.zeros(ATT_SIZE)
+                padded_att[:, :, :att.shape[2], :att.shape[3]] = att
                 # aggregrate all the results
                 # unfold the tensor to 2-D array to walk around buggy numpy sum
-                for layer_idx, (res_layer, pred_layer) in enumerate(zip(res['attentions'], prediction['attentions'])):
-                    for head_idx, (res_head, pred_head) in enumerate(zip(res_layer[0], pred_layer[0])):
-                        res['attentions'][layer_idx][0][head_idx] = np.add(
-                            res_head, pred_head)
+                for layer_idx, (res_layer, pred_layer) in enumerate(zip(res['attentions'], att)):
+                    for head_idx, (res_head, pred_head) in enumerate(zip(res_layer, pred_layer)):
+                        res['attentions'][layer_idx][head_idx] = np.add(res_head, pred_head)
 
         pipeline_running_counter += 1
+        total_elem_count += sum([att.shape[-2] * att.shape[-1] for att in att_array])
 
-        if (sample_inputs > 0 and (res['attentions'] > pipeline_running_counter).any()):
-            idx0, idx1, idx2, idx3, idx4 = np.where(
-                res['attentions'] > pipeline_running_counter)
-            print("iter {} has attention larger than 1 ({}), exist..."
-                  .format(pipeline_running_counter, (idx0[0], idx1[0], idx2[0], idx3[0], idx4[0])))
-            exit()
+        if (sample_inputs > 0): 
+            for i in res['attentions']: 
+                if (i > len(res['attentions'])).any() :
+                    idx0, idx1, idx2, idx3, idx4 = np.where(i > len(res['attentions']))
+                    print("iter {} has attention larger than 1 ({}), exist..."
+                        .format(len(res['attentions']), (idx0[0], idx1[0], idx2[0], idx3[0], idx4[0])))
+                    exit()
 
         print(prediction['answer'], em_score, res['score'] / pipeline_running_counter)
-        print("ratio of overlapped instances: {}/{}".format(overlap_inst_counter,
-                                                            res['max'].shape[1]))
 
-        # check sparsity filter apply
-        # if spars_threshold > 0.0:
-        #     att_mask = np.expand_dims(
-        #         np.amax(prediction['attentions'], axis=-1) * spars_threshold, axis=-1)
-        #     sampled_data = prediction['attentions'] * \
-        #         (prediction['attentions'] <= att_mask)
-        #     if (sampled_data > 0.0).any():
-        #         print("sparsity check failed!")
-        #         exit()
-
-        # screen_clear()
-
+    res['sparsity'] = res['sparsity'].astype(float) / total_elem_count
     res['qa_pair_len'] = fed_data_len
     return res
 
@@ -217,6 +210,10 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
         with open(h_states_path, "rb") as h_states_file:
             all_hidden_states = np.load(h_states_file)
         with open(atten_path, "rb") as attention_file:
+            if sample_inputs > 0:
+                all_attentions = []
+                for i in all_attentions: all_attentions.append(np.load(attention_file))
+            else: all_attentions = np.load(attention_file)
             all_attentions = np.load(attention_file)
         with open(att_stat_path, "rb") as att_stat_file:
             all_max = np.load(att_stat_file)
@@ -241,7 +238,9 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
         with open(h_states_path, "wb+") as h_states_file:
             np.save(h_states_file, all_hidden_states)
         with open(atten_path, "wb+") as attention_file:
-            np.save(attention_file, all_attentions)
+            if sample_inputs > 0:
+                for i in all_attentions: np.save(attention_file, i)
+            else: np.save(attention_file, all_attentions)
         with open(att_stat_path, "wb+") as att_stat_file:
             np.save(att_stat_file, all_max)
             np.save(att_stat_file, all_min)
@@ -251,10 +250,13 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
 
     print("total score: ", total_score, "#QA pair: ", qa_pair_count,
           "hidden_state dim: ", all_hidden_states.shape,
-          "attention dim:", all_attentions.shape,
           "max dim:", all_max.shape, "min dim:", all_min.shape,
           "mean dim:", all_mean.shape, "std dim:", all_std.shape,
           "sparsity dim:", all_sparsity.shape)
+    if sample_inputs > 0:
+        print("attention dim:", len(all_attentions), all_attentions[0].shape)
+    else:
+        print("attention dim:", all_attentions[0].shape)
 
     total_score /= float(qa_pair_count)
 
@@ -289,7 +291,7 @@ def get_sparsities(params_path: str, sparsity_bar=0.025, layer_aggregration='mea
                 all_std = np.load(att_stat_file)
                 all_sparsity = np.load(att_stat_file)
 
-        avg_all_sparsity = np.mean(all_sparsity, axis=1)
+        avg_all_sparsity = np.mean(all_sparsity, axis=0)
         for layer_idx, layer in enumerate(avg_all_sparsity):
             for head_idx, spars_per_head in enumerate(layer):
                 sparsity_table.at[threshold, 'layer_{}_head_{}'.format(
@@ -413,14 +415,10 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
         plt.close(fig)
 
 
-def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='', samples=-1, scale='log', sample_on_token=False):
+def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='', samples=10, scale='log'):
     '''
-    computing histogram on-the-fly without saving the attentions in the memory
+    computing histogram per token on-the-fly without saving the attentions in the memory
     '''
-    # argument sanity check
-    if samples < 0 and sample_on_token:
-        raise ValueError("samples must be > 0 when sample_on_token is True")
-
     # set histogram x axis starting point here
     offset = 1e-8
     hist_x_start, hist_x_end = log(offset, 10), log(1+offset, 10)
@@ -452,17 +450,18 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
         else:
             return None
 
-    file_type = "_sampled" if samples > 0 else ""
+    file_type = "_sampled_per_token"
     hist_file_path = PARAM_PATH + "atten_hist{}.npy".format(file_type)
 
     atten_bins, atten_hist, all_score = get_bin_edges(bin_step), None, 0
-    all_max, all_min, all_sparse_count, all_count = None, None, None, 0
+    all_max, all_min, all_sparse_count, all_seq_len = None, None, None, None
 
     if os.path.isfile(hist_file_path):
         print("loading histogram from ", hist_file_path)
         with open(hist_file_path, "rb") as hist_file:
             atten_hist = np.load(hist_file)
             atten_bins = np.load(hist_file)
+            all_seq_len = np.load(hist_file)
             all_max = np.load(hist_file)
             all_min = np.load(hist_file)
             all_sparse_count = np.load(hist_file)
@@ -476,12 +475,10 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
                 context_ques_pair.append(
                     {'context': context, 'question': ques['question'], 'answers': ques['answers']})
             associated_data.append(context_ques_pair)
-
-        associated_data = sum(associated_data, [])
-        if samples > 0:
-            # fixed random seed to select same subsets of the instances every time for comparison
-            random.seed(123)
-            associated_data = random.sample(associated_data, samples)
+        
+        # fixed random seed to select same subsets of the instances every time for comparison
+        random.seed(123)
+        associated_data = random.sample(sum(associated_data, []), samples)
         input_lens = [len(i['context']+i['question']) for i in associated_data]
         print("QA string pair length: [{}, {}]".format(min(input_lens), max(input_lens)))
         pipeline_running_counter, fed_data_len = 0, len(associated_data)
@@ -493,51 +490,27 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
             pipeline_running_counter += 1
             em_score = max(compute_exact(prediction['answer'], gold_ans)
                            for gold_ans in qa_pair['answers'])
-            flat_att = np.concatenate(
-                np.array_split(prediction['attentions'], prediction['attentions'].shape[1], axis=1), axis=-1)
-            flat_att = np.squeeze(flat_att)
-            if not sample_on_token:
-                flat_att = flat_att.reshape(*flat_att.shape[:2], -1)
-            print("flat_att shape:", flat_att.shape)
+
+            for att in prediction['attentions']:
+                flat_att = att.reshape(*att.shape[:2], -1)
+                curr_hist = np.apply_along_axis(lambda a: np.histogram(a+offset, atten_bins)[0], -1, att)
+                atten_hist = [curr_hist] if atten_hist is None else atten_hist + [curr_hist]
+                curr_sparse_count = np.apply_along_axis(lambda a: (a <= sparsity_bar).sum(), -1, flat_att)
+                all_sparse_count = curr_sparse_count if all_sparse_count is None \
+                                    else np.add(curr_sparse_count, all_sparse_count) 
+                all_seq_len = [att.shape[-1]] if all_seq_len is None else all_seq_len + [att.shape[-1]]
+                curr_max, curr_min = np.amax(att, axis=(-2, -1)), np.amin(att, axis=(-2, -1))
 
             all_score += em_score
-            curr_hist = np.apply_along_axis(lambda a: np.histogram(
-                a+offset, atten_bins)[0], -1, flat_att)
-            if sample_on_token: 
-                curr_max, curr_min = np.amax(flat_att, axis=(-2, -1)), np.amin(flat_att, axis=(-2, -1))
-            else:
-                curr_max, curr_min = np.amax(flat_att, axis=-1), np.amin(flat_att, axis=-1)
-            if sparsity_bar == 0.0:
-                curr_sparse_count = np.apply_along_axis(lambda a: flat_att.shape[-1] - np.count_nonzero(a), -1, flat_att)
-                print(curr_sparse_count[0][0])
-            else:
-                curr_sparse_count = np.apply_along_axis(lambda a: (a < sparsity_bar).sum(), -1, flat_att)
-
-            if samples > 0:
-                atten_hist = [curr_hist] if atten_hist is None else atten_hist + [curr_hist]
-                curr_sparse_count = curr_sparse_count.astype(float) / flat_att.shape[-1]
-                all_sparse_count = [curr_sparse_count] if all_sparse_count is None else all_sparse_count + [curr_sparse_count]
-            else:
-                atten_hist = curr_hist if atten_hist is None else np.add(
-                    atten_hist, curr_hist)
-                all_sparse_count = curr_sparse_count if all_sparse_count is None else np.add(
-                    all_sparse_count, curr_sparse_count)
-
             all_max = curr_max if all_max is None else np.maximum(all_max, curr_max)
             all_min = curr_min if all_min is None else np.minimum(all_min, curr_min)
-            all_count += flat_att.shape[-1]
-        
-        if samples > 0 and sample_on_token:
-            atten_hist = np.concatenate(atten_hist, axis=2)
-            all_sparse_count = np.concatenate(all_sparse_count, axis=2)
-        elif samples > 0:
-            atten_hist = np.stack(atten_hist, axis=2)
-            all_sparse_count = np.stack(all_sparse_count, axis=2)
-        else:
-            all_sparse_count = all_sparse_count.astype(float) / all_count
 
+        all_sparse_count = all_sparse_count.astype(float) / (sum(all_seq_len) * ATT_SIZE[2])
+        atten_hist = np.stack(atten_hist, axis=2)
+        
         print("atten_hist shape:", atten_hist.shape)
         print("sparsity shape:", all_sparse_count.shape)
+        print("all seq shape:", len(all_seq_len))
         print("EM score", all_score / fed_data_len)
 
         # Normalization
@@ -546,6 +519,7 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
         with open(hist_file_path, "wb+") as hist_file:
             np.save(hist_file, atten_hist, allow_pickle=False)
             np.save(hist_file, atten_bins, allow_pickle=False)
+            np.save(hist_file, all_seq_len, allow_pickle=False)
             np.save(hist_file, all_max, allow_pickle=False)
             np.save(hist_file, all_min, allow_pickle=False)
             np.save(hist_file, all_sparse_count, allow_pickle=False)
@@ -557,29 +531,25 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
         fig, ax = plt.subplots(3, 4, figsize=(21, 12))
         for head_idx, head in enumerate(layer):
             curr_ax = ax[int(head_idx / 4), int(head_idx % 4)]
-            if samples > 0:
-                alpha_val = 0.01
-                for inst in head:
-                    curr_ax.plot(atten_bins[:-1], inst, atten_bar_width,
-                                 color='C0', linewidth=0.5, alpha=alpha_val)
-                    curr_ax.plot(atten_bins[:-1], np.cumsum(inst),
-                                 color='C3', linewidth=0.5, alpha=alpha_val)
-            else:
-                curr_ax.bar(atten_bins[:-1], head, atten_bar_width, color='C0')
-                curr_ax.step(atten_bins[:-1], np.cumsum(head),
-                             color='C3', linewidth=1, where='post')
+            alpha_val = 0.01
+            for seq_len, inst in zip(all_seq_len, head):
+                for row_idx, row in enumerate(inst):
+                    lstyle = '-' if row_idx < seq_len else ':'
+                    curr_ax.plot(atten_bins[:-1], row, atten_bar_width,
+                                    color='C0', linewidth=0.5, linestyle=lstyle, alpha=alpha_val)
+                    curr_ax.plot(atten_bins[:-1], np.cumsum(row),
+                                    color='C3', linewidth=0.5, linestyle=lstyle, alpha=alpha_val)
 
             subplot_title = 'head_{}, max: {:.4f}, min: {:.4f}'.format(
                 head_idx, all_max[layer_idx][head_idx], all_min[layer_idx][head_idx])
-            if samples < 0:
-                subplot_title += ", spars: {:.4f}, sparsity_bar: {:.4f}".format(
+            subplot_title += ", spars: {:.4f}, sparsity_bar: {:.4f}".format(
                     all_sparse_count[layer_idx][head_idx], sparsity_bar)
 
             curr_ax.set_title('\n'.join(wrap(subplot_title, 38)))
             curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
             curr_ax.set_xscale(scale)
             # curr_ax.set_yscale('log')
-            curr_ax.set_ylim([0, 1])
+            curr_ax.set_ylim([0, 0.23])
             if scale == 'log':
                 curr_ax.set_xlim([10 ** hist_x_start - 10 ** (hist_x_start-1),
                                   10 ** hist_x_end])
@@ -595,31 +565,32 @@ def plot_dist_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='
         plt.close(fig)
 
     # plot sparsity histogram when sampling:
-    if samples > 0:
-        for layer_idx, layer in enumerate(atten_hist):
-            fig, ax = plt.subplots(3, 4, figsize=(21, 12))
-            for head_idx, head in enumerate(layer):
-                curr_ax = ax[int(head_idx/4), int(head_idx % 4)]
-                head_sparsity = all_sparse_count[layer_idx][head_idx]
-                curr_ax.hist(head_sparsity, bins=100, range=(0, 1.0), weights=(np.ones_like(head_sparsity)/len(head_sparsity)))
-                curr_ax.hist(head_sparsity, bins=100, range=(0, 1.0), weights=(np.ones_like(head_sparsity)/len(head_sparsity)), 
-                    cumulative=True, histtype='step', linewidth=1, color='C3')
+    # if samples > 0:
+    #     for layer_idx, layer in enumerate(atten_hist):
+    #         fig, ax = plt.subplots(3, 4, figsize=(21, 12))
+    #         for head_idx, head in enumerate(layer):
+    #             curr_ax = ax[int(head_idx/4), int(head_idx % 4)]
+    #             head_sparsity = all_sparse_count[layer_idx][head_idx]
+    #             curr_ax.hist(head_sparsity, bins=100, range=(0, 1.0), weights=(
+    #                 np.ones_like(head_sparsity)/len(head_sparsity)))
+    #             curr_ax.hist(head_sparsity, bins=100, range=(0, 1.0), weights=(np.ones_like(head_sparsity)/len(head_sparsity)),
+    #                          cumulative=True, histtype='step', linewidth=1, color='C3')
 
-                subplot_title = 'head_{}, max: {:.4f}, min: {:.4f}'.format(
-                    head_idx, all_max[layer_idx][head_idx], all_min[layer_idx][head_idx])
+    #             subplot_title = 'head_{}, max: {:.4f}, min: {:.4f}'.format(
+    #                 head_idx, all_max[layer_idx][head_idx], all_min[layer_idx][head_idx])
 
-                curr_ax.set_title('\n'.join(wrap(subplot_title, 38)))
-                curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
-                curr_ax.set_ylim([0, 1])
-                curr_ax.set_xlim([0, 1])
+    #             curr_ax.set_title('\n'.join(wrap(subplot_title, 38)))
+    #             curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
+    #             curr_ax.set_ylim([0, 1])
+    #             curr_ax.set_xlim([0, 1])
 
-            fig.suptitle("Sparsity Histogram for layer {} per head {}, with sparsity bar {:.4f}".format(
-                layer_idx, attached_title, sparsity_bar), fontsize=21, y=0.99)
-            fig.tight_layout()
-            plt.savefig(
-                RES_FIG_PATH+'spars_hist_layer_otf_{}{}.png'.format(layer_idx, file_type), dpi=600)
-            plt.clf()
-            plt.close(fig)
+    #         fig.suptitle("Sparsity Histogram for layer {} per head {}, with sparsity bar {:.4f}".format(
+    #             layer_idx, attached_title, sparsity_bar), fontsize=21, y=0.99)
+    #         fig.tight_layout()
+    #         plt.savefig(
+    #             RES_FIG_PATH+'spars_hist_layer_otf_{}{}.png'.format(layer_idx, file_type), dpi=600)
+    #         plt.clf()
+    #         plt.close(fig)
 
 
 def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True, layer_aggregration='mean', attached_title=''):
@@ -784,8 +755,8 @@ if __name__ == '__main__':
 
     if args['distribution']:
         em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \
-            get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False, 
-            single_input=False, layer_aggregration='mean', spars_threshold=spars_threshold, sample_inputs=samples)
+            get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False,
+                               single_input=False, layer_aggregration='mean', spars_threshold=spars_threshold, sample_inputs=samples)
         em_str = 'EM={:.2f}'.format(em_score*100)
         stat_features = get_stat_features(
             {'max': att_max, 'min': att_min, 'mean': att_mean, 'std': att_std})
@@ -820,4 +791,4 @@ if __name__ == '__main__':
         plot_sparsity_change(spars, attached_title='(dynamic threshold)')
 
     if args['otf_distribution']:
-        plot_dist_dynamic("csarron/roberta-base-squad-v1", 100, 0.0, samples=samples, scale='log', sample_on_token=True, attached_title='')
+        plot_dist_token_dynamic("csarron/roberta-base-squad-v1", 100, 0.0, samples=samples, scale='log', attached_title='(per_token)')
