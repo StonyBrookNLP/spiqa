@@ -27,23 +27,27 @@ FILT_PARAM_PATH = "./filtered_params/"
 
 def extract_inst_wikipedia(num_sentences: int):
     dataset = load_dataset("wikipedia", "20200501.en", cache_dir=DATA_PATH)
-    # dataset = random.sample(dataset['train']['text'], num_sentences)
-    dataset = dataset[:num_sentences]
-    return dataset
+    dataset = random.sample(dataset['train']['text'], num_sentences)
+    insts = []
+    for doc in dataset:
+        insts.append(doc.split('\n\n')[0])
+    return insts 
 
 def get_attention_from_model(model_name: str, num_sentences: int):
     # helper func: convert attention to numpy array in 
     # list of [inst, [layers, heads, rows, cols]]
-    def convert_att_to_np(x, attn_mask): 
+    def convert_att_to_np(x, attn_mask):
+        attn_mask = (torch.sum(attn_mask, dim=-1)).cpu().numpy()
         temp, res = np.asarray([layer.cpu().numpy() for layer in x]), []
         for i in range(temp.shape[1]):
             res.append(np.squeeze(temp[:, i, :, :attn_mask[i], :attn_mask[i]]))
         return res
     
-    param_file_path = PARAM_PATH + "_" + model_name
+    param_file_path = PARAM_PATH + model_name
 
     attentions, attn_mask = None, None
     if os.path.isfile(param_file_path + "_attention.npy"):
+        print("loading parameters from file...")
         with open(param_file_path + "_attention_mask.npy", "rb") as att_mask_file:
             attn_mask = np.load(att_mask_file)
         with open(param_file_path + "_attention.npy", "rb") as att_file:
@@ -58,13 +62,13 @@ def get_attention_from_model(model_name: str, num_sentences: int):
         insts = extract_inst_wikipedia(num_sentences)
         input_tokens = tokenizer.batch_encode_plus(insts, padding=True, return_tensors="pt")
 
-        print(input_tokens[:3])
         # run model
         if torch.cuda.is_available(): 
             for i in input_tokens.keys():
                 input_tokens[i] = input_tokens[i].to("cuda")
-                
-        model_output = model(**input_tokens)
+              
+        with torch.no_grad():
+            model_output = model(**input_tokens)
         attentions = convert_att_to_np(model_output[3], input_tokens['attention_mask'])
         attn_mask = input_tokens['attention_mask'].cpu().numpy()
         with open(param_file_path + "_attention_mask.npy", "wb+") as att_mask_file:
@@ -72,9 +76,9 @@ def get_attention_from_model(model_name: str, num_sentences: int):
         with open(param_file_path + "_attention.npy", "wb+") as att_file:
             for i in range(len(attn_mask)): np.save(att_file, attentions[i], allow_pickle=False)
         
-    print ("Shape of attention weight matrices", len(attentions), attentions.shape)
+    print ("Shape of attention weight matrices", len(attentions), attentions[0].shape)
 
     return attentions
 
 if __name__ == "__main__":
-    get_attention_from_model('roberta-base', 10)
+    get_attention_from_model('roberta-base', 100)
