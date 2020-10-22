@@ -100,6 +100,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
 
     # sample several instances from all data for short test
     if sample_inputs > 0:
+        random.seed(123)
         associated_data = random.sample(associated_data, sample_inputs)
 
     fed_data = associated_data
@@ -211,10 +212,9 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
             all_hidden_states = np.load(h_states_file)
         with open(atten_path, "rb") as attention_file:
             if sample_inputs > 0:
-                all_attentions = []
-                for i in all_attentions: all_attentions.append(np.load(attention_file))
+                atten_len, all_attentions = (np.load(attention_file))[0], []
+                for i in range(atten_len): all_attentions.append(np.load(attention_file))
             else: all_attentions = np.load(attention_file)
-            all_attentions = np.load(attention_file)
         with open(att_stat_path, "rb") as att_stat_file:
             all_max = np.load(att_stat_file)
             all_min = np.load(att_stat_file)
@@ -239,6 +239,7 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
             np.save(h_states_file, all_hidden_states)
         with open(atten_path, "wb+") as attention_file:
             if sample_inputs > 0:
+                np.save(attention_file, np.array([len(all_attentions)]))
                 for i in all_attentions: np.save(attention_file, i)
             else: np.save(attention_file, all_attentions)
         with open(att_stat_path, "wb+") as att_stat_file:
@@ -315,7 +316,7 @@ def get_stat_features(att_features: dict):
         for stat_func in stat_func_list.keys():
             stat_table['{}_{}'.format(stat_func, att_feature_key)] = \
                 stat_func_list[stat_func](
-                    att_features[att_feature_key], axis=1).flatten().tolist()
+                    att_features[att_feature_key], axis=0).flatten().tolist()
 
     return stat_table
 
@@ -325,7 +326,7 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
     Plot the histrogram to visualize the distribution of the self attention 
     matrix for each attention head in each layer.
 
-    expected data shape: (#layers, #heads, length, dv)
+    expected data shape: (#layers, #insts, #heads, length, length)
     layers: layer_<0-11>
     sparsity_bar: threshold for sparsity calculation
     '''
@@ -356,10 +357,14 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
 
     if single_head_idx is None:
         # walk through layers and heads
+        data = np.concatenate(data, axis=-1)
+        data = data.reshape(*data.shape[:2], -1)
+        print(data.shape)
+        
         for layer_idx, layer in enumerate(data):
             print('plotting histogram for layer {}...'.format(layer_idx))
             atten_layers = {}
-            for head_idx, head in enumerate(layer[0]):
+            for head_idx, head in enumerate(layer):
                 sparsity = (head <= (sparsity_bar)).sum() / head.flatten().shape[0]
                 atten_layers['head_{}, max: {:.4f}, min: {:.4f}, spars: {:.4f}, sparsity_bar: {:.4f}'.format(
                     head_idx, np.amax(head), np.amin(head), sparsity, sparsity_bar)] = (head.flatten()+offset).tolist()
@@ -765,30 +770,31 @@ if __name__ == '__main__':
         stat_features.to_csv('stat_features_unfiltered.csv', sep=',')
 
         # plot histogram for all layers and all heads
-        plot_dist(attens, bin_step=60, sparsity_bar=0.0005,
+        plot_dist(attens, bin_step=100, sparsity_bar=0.0005,
                   layer_aggregration='None', attached_title=em_str)
-        # plot histogram for a certain head in a certain layer
-        plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
-                  single_head_idx=(0, 0), attached_title=em_str)
-        plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
-                  single_head_idx=(0, 9), attached_title=em_str)
-        plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
-                  single_head_idx=(0, 11), attached_title=em_str)
+        # # plot histogram for a certain head in a certain layer
+        # plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
+        #           single_head_idx=(0, 0), attached_title=em_str)
+        # plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
+        #           single_head_idx=(0, 9), attached_title=em_str)
+        # plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
+        #           single_head_idx=(0, 11), attached_title=em_str)
 
-    if args['heatmap']:
-        # plot heatmaps
-        plot_heatmap(attens, sparsity_bar=0.0005, binarize=False, attached_title=em_str)
-        plot_heatmap(attens, sparsity_bar=0.0005, binarize=True, attached_title=em_str)
-        plot_heatmap(attens, sparsity_bar=0.0005, binarize=False,
-                     auto_scale=True, attached_title=em_str)
+        # only plot heatmaps when distribution is available, temperarily broken
+        if args['heatmap']:
+            # plot heatmaps
+            plot_heatmap(attens, sparsity_bar=0.0005, binarize=False, attached_title=em_str)
+            plot_heatmap(attens, sparsity_bar=0.0005, binarize=True, attached_title=em_str)
+            plot_heatmap(attens, sparsity_bar=0.0005, binarize=False,
+                        auto_scale=True, attached_title=em_str)
 
     if args['sparsity']:
-        # compute sparsity
+        # compute sparsity, temperarily broken
         stat_filtered_spars = get_sparsities('filtered_params/static')
         dyna_filtered_spars = get_sparsities('filtered_params/dyna')
         print(stat_filtered_spars, dyna_filtered_spars)
         plot_em_sparsity({'static': stat_filtered_spars, 'dynamic': dyna_filtered_spars})
-        plot_sparsity_change(spars, attached_title='(dynamic threshold)')
+        plot_sparsity_change(dyna_filtered_spars, attached_title='(dynamic threshold)')
 
     if args['otf_distribution']:
         plot_dist_token_dynamic("csarron/roberta-base-squad-v1", 100, 0.0, samples=samples, scale='log', attached_title='(per_token)')
