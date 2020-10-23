@@ -33,10 +33,14 @@ def get_bin_edges(bin_step, hist_x_start, hist_x_end, scale):
         return None
 
 
-def plot_atten_dist_per_token(data, bin_step, scale='log', attached_title='', ylim=[0, 1]):
+def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, scale='log', attached_title='', ylim=[0, 1]):
     """
     plotting the attention histogram per token, stacking all plots together.
-    accepted data: a list of attention matrces, with each as [layer, head, length, length]
+    accepted data: a list of attention matrices, with each as [layer, head, length, length]
+    or a numpy array storing rows of histograms in [layer, head, length, bin_step]
+    attn_max and attn_min provides the max/min values per head across all insts. 
+    They both are in [layer, head]
+    attn_max and attn_min are not required when data is a list of matrice
     """
     offset = 1e-8
     hist_x_start, hist_x_end = log(offset, 10), log(1+offset, 10)
@@ -44,24 +48,27 @@ def plot_atten_dist_per_token(data, bin_step, scale='log', attached_title='', yl
         offset = 0.0
 
     attn_bins, attn_hists = get_bin_edges(bin_step, hist_x_start, hist_x_end, scale), None
-    attn_max, attn_min = None, None
-    for inst in data:
-        inst_attn_hist = np.apply_along_axis(
-            lambda x: np.histogram(x + offset, attn_bins)[0], -1,  inst)
-        inst_attn_max, inst_attn_min = \
-            np.amax(inst, axis=(-2, -1)), np.amin(inst, axis=(-2, -1))
 
-        attn_hists = inst_attn_hist if attn_hists is None else \
-            np.concatenate([attn_hists, inst_attn_hist], axis=-2)
-        attn_max = inst_attn_max if attn_max is None else \
-            np.maximum(attn_max, inst_attn_max)
-        attn_min = inst_attn_min if attn_min is None else \
-            np.minimum(attn_min, inst_attn_min)
+    if type(data) is list:
+        for inst in data:
+            inst_attn_hist = np.apply_along_axis(
+                lambda x: np.histogram(x + offset, attn_bins)[0], -1,  inst)
+            inst_attn_max, inst_attn_min = \
+                np.amax(inst, axis=(-2, -1)), np.amin(inst, axis=(-2, -1))
 
-    # Normalization 
-    attn_hists = np.apply_along_axis(lambda a: a / np.sum(a), -1, attn_hists)
+            attn_hists = inst_attn_hist if attn_hists is None else \
+                np.concatenate([attn_hists, inst_attn_hist], axis=-2)
+            attn_max = inst_attn_max if attn_max is None else \
+                np.maximum(attn_max, inst_attn_max)
+            attn_min = inst_attn_min if attn_min is None else \
+                np.minimum(attn_min, inst_attn_min)
+
+        # Normalization 
+        attn_hists = np.apply_along_axis(lambda a: a / np.sum(a), -1, attn_hists)
+    else:
+        attn_hists = data
+
     print(attn_hists.shape)
-
     atten_bar_width = [attn_bins[i] - attn_bins[i-1] for i in range(1, len(attn_bins))]
 
     for layer_idx, layer in enumerate(attn_hists):

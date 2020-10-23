@@ -12,6 +12,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import matplotlib.patches as mpatches
+import transformer_visualization as tv
 
 import argparse as ag
 import os
@@ -511,7 +512,7 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_t
             all_min = curr_min if all_min is None else np.minimum(all_min, curr_min)
 
         all_sparse_count = all_sparse_count.astype(float) / (sum(all_seq_len) * ATT_SIZE[2])
-        atten_hist = np.stack(atten_hist, axis=2)
+        atten_hist = np.concatenate(atten_hist, axis=-2)
         
         print("atten_hist shape:", atten_hist.shape)
         print("sparsity shape:", all_sparse_count.shape)
@@ -530,44 +531,7 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_t
             np.save(hist_file, all_sparse_count, allow_pickle=False)
 
     # plot atten_hist
-    atten_bar_width = [atten_bins[i] - atten_bins[i-1] for i in range(1, len(atten_bins))]
-
-    for layer_idx, layer in enumerate(atten_hist):
-        fig, ax = plt.subplots(3, 4, figsize=(21, 12))
-        for head_idx, head in enumerate(layer):
-            curr_ax = ax[int(head_idx / 4), int(head_idx % 4)]
-            alpha_val = 0.01
-            for seq_len, inst in zip(all_seq_len, head):
-                for row_idx, row in enumerate(inst):
-                    lstyle = '-' if row_idx < seq_len else ':'
-                    curr_ax.plot(atten_bins[:-1], row, atten_bar_width,
-                                    color='C0', linewidth=0.5, linestyle=lstyle, alpha=alpha_val)
-                    curr_ax.plot(atten_bins[:-1], np.cumsum(row),
-                                    color='C3', linewidth=0.5, linestyle=lstyle, alpha=alpha_val)
-
-            subplot_title = 'head_{}, max: {:.4f}, min: {:.4f}'.format(
-                head_idx, all_max[layer_idx][head_idx], all_min[layer_idx][head_idx])
-            subplot_title += ", spars: {:.4f}, sparsity_bar: {:.4f}".format(
-                    all_sparse_count[layer_idx][head_idx], sparsity_bar)
-
-            curr_ax.set_title('\n'.join(wrap(subplot_title, 38)))
-            curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
-            curr_ax.set_xscale(scale)
-            # curr_ax.set_yscale('log')
-            curr_ax.set_ylim([0, 0.23])
-            if scale == 'log':
-                curr_ax.set_xlim([10 ** hist_x_start - 10 ** (hist_x_start-1),
-                                  10 ** hist_x_end])
-            else:
-                curr_ax.set_xlim([0, 0.02])
-
-        fig.suptitle("Histogram for layer {} per head {}".format(
-            layer_idx, attached_title), fontsize=21, y=0.99)
-        fig.tight_layout()
-        plt.savefig(
-            RES_FIG_PATH+'hist_layer_otf_{}{}.png'.format(layer_idx, file_type), dpi=600)
-        plt.clf()
-        plt.close(fig)
+    tv.plot_atten_dist_per_token(atten_hist, bin_step, all_max, all_min)
 
     # plot sparsity histogram when sampling:
     # if samples > 0:
