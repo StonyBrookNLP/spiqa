@@ -33,6 +33,44 @@ def get_bin_edges(bin_step, hist_x_start, hist_x_end, scale):
         return None
 
 
+def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True, layer_aggregration='mean', attached_title=''):
+    '''
+    Plot the heat map to visualize the relation between each subwords in the
+    self attention of each attention head in each layer
+
+    expected data shape: (#layers, #heads, length, length)
+    layers: layer_<0-11>
+    sparsity_bar: threshold for sparsity calculation
+    auto_scale: whether to auto scale the color bar
+    binarize: if true, all values > sparsity_bar will be 1 and < will be 0
+    '''
+    for layer_idx, layer in enumerate(data):
+        fig, axs = plt.subplots(3, 4, figsize=(19, 12))
+        print("Plotting heatmap for layer {}...".format(layer_idx))
+        for head_idx, head in enumerate(layer[0]):
+            sparsity = (head <= sparsity_bar).sum() / head.flatten().shape[0]
+            info = 'head_{}, max: {:.4f}, min: {:.4f}, spars: {:.4f}, sparsity_bar: {:.4f}'.format(
+                head_idx, np.amax(head), np.amin(head), sparsity, sparsity_bar)
+            if binarize:
+                head = np.array((head > sparsity_bar)).astype("float")
+            ax = axs[int(head_idx/4), int(head_idx % 4)]
+            ax.invert_yaxis()
+            ax.xaxis.tick_top()
+            c = ax.pcolormesh(head) if auto_scale else ax.pcolormesh(
+                head, vmin=0.0, vmax=1.0)
+            fig.colorbar(c, ax=ax)
+            ax.set_title('\n'.join(wrap(info, 35)))
+
+        fig.suptitle('Heatmap of Layer {}\'s Attention per head (batch aggregation={}, {})'
+                     .format(layer_idx, layer_aggregration, attached_title), fontsize=21, y=0.99)
+        fig.tight_layout()
+        fig_path = RES_FIG_PATH+"auto_scale_" if auto_scale else RES_FIG_PATH
+        fig_path = fig_path+"bin_" if binarize else fig_path
+        plt.savefig(fig_path+'heatmap_layer{}.png'.format(layer_idx), dpi=600)
+        plt.clf()
+        plt.close(fig)
+        
+
 def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, scale='log', attached_title='', ylim=[0, 1]):
     """
     plotting the attention histogram per token, stacking all plots together.
