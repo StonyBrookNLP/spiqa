@@ -7,11 +7,7 @@ from transformers import AutoConfig, AutoTokenizer, AutoModel
 from datasets import load_dataset
 import torch
 import numpy as np
-import pandas as pd
-import matplotlib
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
-import matplotlib.patches as mpatches
+import transformer_visualization as tv
 
 import argparse as ag
 import os
@@ -81,4 +77,5 @@ def get_attention_from_model(model_name: str, num_sentences: int):
     return attentions
 
 if __name__ == "__main__":
-    get_attention_from_model('roberta-base', 100)
+    attns = get_attention_from_model('roberta-base', 100)
+    tv.plot_atten_dist_per_token(attns, 100)
