@@ -32,6 +32,7 @@ DATA_PATH = "./data/"
 FILT_PARAM_PATH = "./filtered_params/"
 MAX_SEQ_LEN = 320
 ATT_SIZE = [12, 12, MAX_SEQ_LEN, MAX_SEQ_LEN]
+HS_SIZE = [ATT_SIZE[0]+1, 1, MAX_SEQ_LEN, 64*ATT_SIZE[1]]
 
 def screen_clear():
     _ = call('clear' if os.name == 'posix' else 'cls', shell=True)
@@ -133,7 +134,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
         def agg_func(f): return np.stack([f(i, axis=(-2, -1)) for i in att_array], axis=0)
         def add_func(f): return np.sum([f(i, axis=(-2, -1)) for i in att_array], axis=0)
         if res is None:
-            res = {'score': em_score, 'hidden_states': prediction['hidden_states'],
+            res = {'score': em_score, 'hidden_states': np.zeros(HS_SIZE),
                    'max': agg_func(np.amax), 'min': agg_func(np.amin), 'mean': agg_func(np.mean),
                    'std': agg_func(np.std), 'sparsity': add_func(get_spars)}
             res['attentions'] = [] if sample_inputs > 0 else np.zeros(ATT_SIZE)
@@ -145,13 +146,14 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
             res['std'] = np.concatenate((res['std'], agg_func(np.std)), axis=0)
             res['sparsity'] = np.add(res['sparsity'], add_func(get_spars))
 
-            for layer_idx, (res_layer, pred_layer) in enumerate(zip(res['hidden_states'], prediction['hidden_states'])):
-                res['hidden_states'][layer_idx][0] = np.add(res_layer[0], pred_layer[0])
-        
         # collect attentions
         if sample_inputs > 0:
             res['attentions'] += att_array
+            if np.count_nonzero(res['hidden_states']) == 0: res['hidden_states'] = prediction['hidden_states']
+            else: res['hidden_states'] = np.concatenate((res['hidden_states'], prediction['hidden_states']), axis=1)
         else:
+            for layer_idx, (res_layer, pred_layer) in enumerate(zip(res['hidden_states'], prediction['hidden_states'])):
+                res['hidden_states'][layer_idx][0] = np.add(res_layer[0], pred_layer[0])
             for att in att_array:
                 padded_att = np.zeros(ATT_SIZE)
                 padded_att[:, :, :att.shape[2], :att.shape[3]] = att
@@ -675,8 +677,10 @@ if __name__ == '__main__':
                             required=False, help="print heatmap")
     arg_parser.add_argument("-s", "--sparsity", default=False, action='store_true',
                             required=False, help="compute sparsity")
-    arg_parser.add_argument("-o", "--otf_distribution", default=False, action='store_true',
-                            required=False, help='print histogram without saving aggregrated params')
+    arg_parser.add_argument("-od", "--otf_distribution", default=False, action='store_true',
+                            required=False, help='print attention histogram without saving aggregrated params')
+    arg_parser.add_argument("-hs", "--hidden_states", default=False, action='store_true',
+                            required=False, help='print hidden states histogram without saving aggregrated params')
     arg_parser.add_argument("-sa", "--samples", default=-1,
                             required=False, help="number of samples for distribution")
 
@@ -724,3 +728,10 @@ if __name__ == '__main__':
 
     if args['otf_distribution']:
         plot_dist_token_dynamic("csarron/roberta-base-squad-v1", 100, 0.0, samples=samples, scale='log', attached_title='(per_token)')
+
+    if args['hidden_states']:
+        em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \
+            get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False,
+                               single_input=False, layer_aggregration='mean', spars_threshold=spars_threshold, sample_inputs=samples)
+        attn_mask = [i.shape[-1] for i in attens]
+        tv.plot_hs_dist_per_token(h_states, 100, attn_mask, scale='linear')

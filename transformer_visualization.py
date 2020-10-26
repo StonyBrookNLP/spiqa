@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import matplotlib.patches as mpatches
 from textwrap import wrap
-from math import isnan, fsum, log
+from math import isnan, fsum, log, ceil, floor
 
 
 RES_FIG_PATH = "./res_fig/"
@@ -20,7 +20,7 @@ def get_bin_edges(bin_step, hist_x_start, hist_x_end, scale):
             bin_edges[0] -= 10**(hist_x_start-1)
             return bin_edges
         else:
-            return bin_step
+            return np.linspace(hist_x_start, hist_x_end, bin_step+1)
     elif type(bin_step) is float:
         if scale == 'log':
             bin_edges = 10**np.append(np.arange(hist_x_start,
@@ -69,7 +69,7 @@ def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True, laye
         plt.savefig(fig_path+'heatmap_layer{}.png'.format(layer_idx), dpi=600)
         plt.clf()
         plt.close(fig)
-        
+
 
 def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, scale='log', attached_title='', ylim=[0, 1]):
     """
@@ -101,7 +101,7 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, scal
             attn_min = inst_attn_min if attn_min is None else \
                 np.minimum(attn_min, inst_attn_min)
 
-        # Normalization 
+        # Normalization
         attn_hists = np.apply_along_axis(lambda a: a / np.sum(a), -1, attn_hists)
     else:
         attn_hists = data
@@ -139,6 +139,63 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, scal
             layer_idx, attached_title), fontsize=21, y=0.99)
         fig.tight_layout()
         plt.savefig(
-            RES_FIG_PATH+'hist_per_token_layer_{}.png'.format(layer_idx), dpi=600)
+            RES_FIG_PATH+'at_hist_per_token_layer_{}.png'.format(layer_idx), dpi=600)
         plt.clf()
         plt.close(fig)
+
+
+def plot_hs_dist_per_token(data, bin_step, attn_mask, scale='log', attached_title='', ylim=[0, 1]):
+    """
+    plotting hidden states per token's distribution.
+    data: [#layer+1, batch_size, length, hidden_state_size]
+    attn_mask: a list of available length for each results for 1 batch. len(attn_mask) == batch_size
+    """
+    if len(attn_mask) != data.shape[1]:
+        raise ValueError(
+            "Error: the attention mask should have same length as the batch size in the hidden states.")
+
+    offset = 1e-8
+    if scale == 'linear':
+        offset = 0.0
+
+    hs_max, hs_min = np.amax(data[1:, :, :, :], axis=(-3, -2, -1)), np.amin(data[1:, :, :, :], axis=(-3, -2, -1))
+    # hist_x_start, hist_x_end = float(floor(np.amin(data))), float(ceil(np.amax(data)))
+    hist_x_start, hist_x_end = -5, 5
+    hs_bins, hs_hists = get_bin_edges(bin_step, hist_x_start, hist_x_end, scale), None
+    hs_hists = np.apply_along_axis(
+                lambda x: np.histogram(x, bins=hs_bins, weights=(np.ones_like(x) / len(x)))[0], -1, data)
+
+    hs_bar_width = [hs_bins[i] - hs_bins[i-1] for i in range(1, len(hs_bins))]
+
+    fig, ax = plt.subplots(3, 4, figsize=(21, 12))
+    for layer_idx, layer in enumerate(hs_hists[1:, :, :, :]):
+        curr_ax = ax[int(layer_idx / 4), int(layer_idx % 4)]
+        alpha_val = 0.01
+        for mask, inst in zip(attn_mask, layer):
+            for row_idx, row in enumerate(inst):
+                color_id = 0 if row_idx < mask else 2
+                curr_ax.plot(hs_bins[:-1], row, 
+                        color='C{}'.format(color_id), linewidth=0.5, linestyle='-', alpha=alpha_val)
+                curr_ax.plot(hs_bins[:-1], np.cumsum(row),
+                        color='C{}'.format(color_id+3), linewidth=0.5, linestyle='-', alpha=alpha_val)
+
+        subplot_title = 'layer_{}, max: {:.4f}, min: {:.4f}, #elem<-left: {:.4f}, #elem>right: {:.4f}'.format(
+            layer_idx, hs_max[layer_idx], hs_min[layer_idx], \
+            np.count_nonzero(data[layer_idx+1] < hist_x_start) / float(10*320*768), \
+            np.count_nonzero(data[layer_idx+1] > hist_x_end) / float(10*320*768))
+        curr_ax.set_title('\n'.join(wrap(subplot_title, 38)))
+        curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
+        curr_ax.set_xscale(scale)
+        # curr_ax.set_yscale('log')
+        curr_ax.set_ylim(ylim)
+        if scale == 'log':
+            curr_ax.set_xlim([10 ** hist_x_start - 10 ** (hist_x_start-1),
+                              10 ** hist_x_end])
+        else:
+            curr_ax.set_xlim([hist_x_start, hist_x_end])
+
+    fig.suptitle("Histogram for Hidden States per layer (per token){}".format(attached_title), fontsize=21, y=0.99)
+    fig.tight_layout()
+    plt.savefig(RES_FIG_PATH+'hs_hist_per_token.png', dpi=600)
+    plt.clf()
+    plt.close(fig)
