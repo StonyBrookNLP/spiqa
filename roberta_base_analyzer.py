@@ -29,7 +29,7 @@ def extract_inst_wikipedia(num_sentences: int):
         insts.append(doc.split('\n\n')[0])
     return insts 
 
-def get_attention_from_model(model_name: str, num_sentences: int):
+def get_atten_hist_from_model(model_name: str, num_sentences: int):
     # helper func: convert attention to numpy array in 
     # list of [inst, [layers, heads, rows, cols]]
     def convert_att_to_np(x, attn_mask):
@@ -38,16 +38,20 @@ def get_attention_from_model(model_name: str, num_sentences: int):
         for i in range(temp.shape[1]):
             res.append(np.squeeze(temp[:, i, :, :attn_mask[i], :attn_mask[i]]))
         return res
+
+    def convert_hist_to_np(x): return np.asarray([layer.cpu().numpy() for layer in x])
     
     param_file_path = PARAM_PATH + model_name
 
-    attentions, attn_mask = None, None
+    attentions, attn_mask, hists = None, None, None
     if os.path.isfile(param_file_path + "_attention.npy"):
         print("loading parameters from file...")
         with open(param_file_path + "_attention_mask.npy", "rb") as att_mask_file:
             attn_mask = np.load(att_mask_file)
         with open(param_file_path + "_attention.npy", "rb") as att_file:
             attentions = [np.load(att_file) for i in range(len(attn_mask))]
+        with open(param_file_path + "_hists.npy", "rb") as hists_file:
+            hists = np.load(hists_file)
     else:
         config = AutoConfig.from_pretrained(model_name, output_hidden_states=True, output_attentions=True)
         tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -67,15 +71,20 @@ def get_attention_from_model(model_name: str, num_sentences: int):
             model_output = model(**input_tokens)
         attentions = convert_att_to_np(model_output[3], input_tokens['attention_mask'])
         attn_mask = input_tokens['attention_mask'].cpu().numpy()
+        hists = convert_hist_to_np(model_output[2])
+
         with open(param_file_path + "_attention_mask.npy", "wb+") as att_mask_file:
             np.save(att_mask_file, attn_mask, allow_pickle=False)
         with open(param_file_path + "_attention.npy", "wb+") as att_file:
             for i in range(len(attn_mask)): np.save(att_file, attentions[i], allow_pickle=False)
+        with open(param_file_path + "_hists.npy", "rb") as hists_file:
+            np.save(hists_file, hists, allow_pickle=False)
         
     print ("Shape of attention weight matrices", len(attentions), attentions[0].shape)
 
-    return attentions
+    return attentions, hists, attn_mask
 
 if __name__ == "__main__":
-    attns = get_attention_from_model('roberta-base', 100)
+    attns, hists, attn_mask = get_atten_hist_from_model('roberta-base', 10)
     tv.plot_atten_dist_per_token(attns, 100)
+    tv.plot_hs_dist_per_token(hists, 100, attn_mask, scale='linear')
