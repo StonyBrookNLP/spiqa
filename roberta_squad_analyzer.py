@@ -734,4 +734,8 @@ if __name__ == '__main__':
             get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False,
                                single_input=False, layer_aggregration='mean', spars_threshold=spars_threshold, sample_inputs=samples)
         attn_mask = [i.shape[-1] for i in attens]
+        # h_state sanity check
+        for i in range(10):
+            print("h_state mean:{:.4f}, std:{:.4f}".format(
+                np.mean(h_states[0][0][i*5], axis=-1), np.std(h_states[0][0][i*5], axis=-1)))
         tv.plot_hs_dist_per_token(h_states, 100, attn_mask, scale='linear')

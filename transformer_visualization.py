@@ -160,30 +160,33 @@ def plot_hs_dist_per_token(data, bin_step, attn_mask, scale='log', attached_titl
 
     hs_max, hs_min = np.amax(data[1:, :, :, :], axis=(-3, -2, -1)), np.amin(data[1:, :, :, :], axis=(-3, -2, -1))
     # hist_x_start, hist_x_end = float(floor(np.amin(data))), float(ceil(np.amax(data)))
-    hist_x_start, hist_x_end = -5, 5
+    hist_x_start, hist_x_end = -2.5, 2.5
     hs_bins, hs_hists = get_bin_edges(bin_step, hist_x_start, hist_x_end, scale), None
     hs_hists = np.apply_along_axis(
                 lambda x: np.histogram(x, bins=hs_bins, weights=(np.ones_like(x) / len(x)))[0], -1, data)
 
     hs_bar_width = [hs_bins[i] - hs_bins[i-1] for i in range(1, len(hs_bins))]
 
-    fig, ax = plt.subplots(3, 4, figsize=(21, 12))
+    fig, ax = plt.subplots(3, 4, figsize=(22, 15))
+    matplotlib.rcParams.update({'font.size': 12})
+    matplotlib.rcParams.update({'xtick.labelsize': 13})
+    matplotlib.rcParams.update({'ytick.labelsize': 13})
     for layer_idx, layer in enumerate(hs_hists[1:, :, :, :]):
         curr_ax = ax[int(layer_idx / 4), int(layer_idx % 4)]
         alpha_val = 0.01
         for mask, inst in zip(attn_mask, layer):
             for row_idx, row in enumerate(inst):
-                color_id = 0 if row_idx < mask else 2
+                color_id = 0 if row_idx < mask else 5
                 curr_ax.plot(hs_bins[:-1], row, 
                         color='C{}'.format(color_id), linewidth=0.5, linestyle='-', alpha=alpha_val)
                 curr_ax.plot(hs_bins[:-1], np.cumsum(row),
                         color='C{}'.format(color_id+3), linewidth=0.5, linestyle='-', alpha=alpha_val)
 
-        subplot_title = 'layer_{}, max: {:.4f}, min: {:.4f}, #elem<-left: {:.4f}, #elem>right: {:.4f}'.format(
+        subplot_title = 'layer_{}, max: {:.4f}, min: {:.4f}, \n#elem<left: {:.4f}, #elem>right: {:.4f}'.format(
             layer_idx, hs_max[layer_idx], hs_min[layer_idx], \
             np.count_nonzero(data[layer_idx+1] < hist_x_start) / float(10*320*768), \
             np.count_nonzero(data[layer_idx+1] > hist_x_end) / float(10*320*768))
-        curr_ax.set_title('\n'.join(wrap(subplot_title, 38)))
+        curr_ax.set_title('\n'.join(wrap(subplot_title, 42)))
         curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
         curr_ax.set_xscale(scale)
         # curr_ax.set_yscale('log')
@@ -193,9 +196,14 @@ def plot_hs_dist_per_token(data, bin_step, attn_mask, scale='log', attached_titl
                               10 ** hist_x_end])
         else:
             curr_ax.set_xlim([hist_x_start, hist_x_end])
-
+    
     fig.suptitle("Histogram for Hidden States per layer (per token){}".format(attached_title), fontsize=21, y=0.99)
-    fig.tight_layout()
+    patches = [mpatches.Patch(color='C0', label='pdf of tokens within actual size'), 
+                mpatches.Patch(color='C3', label='cdf of tokens within actual size'), 
+                mpatches.Patch(color='C5', label='pdf of padded tokens'),
+                mpatches.Patch(color='C8', label='cdf of padded tokens')]
+    fig.legend(handles=patches, loc='upper center', ncol=4, bbox_to_anchor=(0.5, 0.97))
+    fig.tight_layout(pad=2.2)
     plt.savefig(RES_FIG_PATH+'hs_hist_per_token.png', dpi=600)
     plt.clf()
     plt.close(fig)
