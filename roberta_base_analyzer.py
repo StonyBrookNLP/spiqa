@@ -77,14 +77,20 @@ def get_atten_hist_from_model(model_name: str, num_sentences: int):
             np.save(att_mask_file, attn_mask, allow_pickle=False)
         with open(param_file_path + "_attention.npy", "wb+") as att_file:
             for i in range(len(attn_mask)): np.save(att_file, attentions[i], allow_pickle=False)
-        with open(param_file_path + "_hists.npy", "rb") as hists_file:
+        with open(param_file_path + "_hists.npy", "wb+") as hists_file:
             np.save(hists_file, hists, allow_pickle=False)
         
     print ("Shape of attention weight matrices", len(attentions), attentions[0].shape)
 
-    return attentions, hists, attn_mask
+    return attentions, hists
 
 if __name__ == "__main__":
-    attns, hists, attn_mask = get_atten_hist_from_model('roberta-base', 10)
-    tv.plot_atten_dist_per_token(attns, 100)
+    attns, hists = get_atten_hist_from_model('roberta-base', 100)
+    attn_mask = [i.shape[-1] for i in attns]
+    print(hists.shape, len(attn_mask))
+    # h_state sanity check
+    for i in range(10):
+        print("h_state mean:{:.4f}, std:{:.4f}".format(
+            np.mean(hists[0][0][i*5], axis=-1), np.std(hists[0][0][i*5], axis=-1)))
+    # tv.plot_atten_dist_per_token(attns, 100)
     tv.plot_hs_dist_per_token(hists, 100, attn_mask, scale='linear')
