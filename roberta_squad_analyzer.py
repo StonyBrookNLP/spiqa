@@ -115,7 +115,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
         fed_data = filtered_associated_data
     if single_input:
         single_associated_data = [random.choice(associated_data)]
-        fed_data = single_associated_data if single_input else fed_data
+        fed_data = single_associated_data
 
     res, pipeline_running_counter, fed_data_len = None, 0, len(fed_data)
     total_elem_count = 0
@@ -161,7 +161,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
                 padded_att[:, :, :att.shape[2], :att.shape[3]] = att
                 # aggregrate all the results
                 # unfold the tensor to 2-D array to walk around buggy numpy sum
-                for layer_idx, (res_layer, pred_layer) in enumerate(zip(res['attentions'], att)):
+                for layer_idx, (res_layer, pred_layer) in enumerate(zip(res['attentions'], padded_att)):
                     for head_idx, (res_head, pred_head) in enumerate(zip(res_layer, pred_layer)):
                         res['attentions'][layer_idx][head_idx] = np.add(res_head, pred_head)
 
