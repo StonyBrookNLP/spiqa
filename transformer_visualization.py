@@ -71,7 +71,7 @@ def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True, laye
         plt.close(fig)
 
 
-def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, scale='log', attached_title='', ylim=[0, 1]):
+def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, scale='log', attached_title='', ylim=(0.2, 1)):
     """
     plotting the attention histogram per token, stacking all plots together.
     accepted data: a list of attention matrices, with each as [layer, head, length, length]
@@ -114,11 +114,12 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, scal
         fig, ax = plt.subplots(3, 4, figsize=(21, 12))
         for head_idx, head in enumerate(layer):
             curr_ax = ax[int(head_idx / 4), int(head_idx % 4)]
+            curr_ax2 = curr_ax.twinx()
             alpha_val = 0.01
             for row in head:
                 curr_ax.plot(attn_bins[:-1], row, atten_bar_width,
                              color='C0', linewidth=0.5, linestyle='-', alpha=alpha_val)
-                curr_ax.plot(attn_bins[:-1], np.cumsum(row),
+                curr_ax2.plot(attn_bins[:-1], np.cumsum(row),
                              color='C3', linewidth=0.5, linestyle='-', alpha=alpha_val)
 
             subplot_title = 'head_{}, max: {:.4f}, min: {:.4f}'.format(
@@ -128,7 +129,10 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, scal
             curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
             curr_ax.set_xscale(scale)
             # curr_ax.set_yscale('log')
-            curr_ax.set_ylim(ylim)
+            curr_ax.set_yticks(np.linspace(0, ylim[0], 11))
+            curr_ax2.set_yticks(np.linspace(0, ylim[1], 11))
+            curr_ax.set_ylim((0, ylim[0]))
+            curr_ax2.set_ylim((0, ylim[1]))
             if scale == 'log':
                 curr_ax.set_xlim([10 ** hist_x_start - 10 ** (hist_x_start-1),
                                   10 ** hist_x_end])
@@ -144,7 +148,7 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, scal
         plt.close(fig)
 
 
-def plot_hs_dist_per_token(data, bin_step, attn_mask, scale='log', attached_title='', ylim=[0, 1]):
+def plot_hs_dist_per_token(data, bin_step, attn_mask, scale='log', attached_title='', ylim=(0.2, 1)):
     """
     plotting hidden states per token's distribution.
     data: [#layer+1, batch_size, length, hidden_state_size]
@@ -153,10 +157,6 @@ def plot_hs_dist_per_token(data, bin_step, attn_mask, scale='log', attached_titl
     if len(attn_mask) != data.shape[1]:
         raise ValueError(
             "Error: the attention mask should have same length as the batch size in the hidden states.")
-
-    offset = 1e-8
-    if scale == 'linear':
-        offset = 0.0
 
     hs_max, hs_min = np.amax(data[1:, :, :, :], axis=(-3, -2, -1)), np.amin(data[1:, :, :, :], axis=(-3, -2, -1))
     # hist_x_start, hist_x_end = float(floor(np.amin(data))), float(ceil(np.amax(data)))
@@ -173,13 +173,14 @@ def plot_hs_dist_per_token(data, bin_step, attn_mask, scale='log', attached_titl
     matplotlib.rcParams.update({'ytick.labelsize': 13})
     for layer_idx, layer in enumerate(hs_hists[1:, :, :, :]):
         curr_ax = ax[int(layer_idx / 4), int(layer_idx % 4)]
+        curr_ax2 = curr_ax.twinx()
         alpha_val = 0.01
         for mask, inst in zip(attn_mask, layer):
             for row_idx, row in enumerate(inst):
                 color_id = 0 if row_idx < mask else 5
                 curr_ax.plot(hs_bins[:-1], row, 
                         color='C{}'.format(color_id), linewidth=0.5, linestyle='-', alpha=alpha_val)
-                curr_ax.plot(hs_bins[:-1], np.cumsum(row),
+                curr_ax2.plot(hs_bins[:-1], np.cumsum(row),
                         color='C{}'.format(color_id+3), linewidth=0.5, linestyle='-', alpha=alpha_val)
 
         subplot_title = 'layer_{}, max: {:.4f}, min: {:.4f}, \n#elem<left: {:.4f}, #elem>right: {:.4f}'.format(
@@ -190,7 +191,10 @@ def plot_hs_dist_per_token(data, bin_step, attn_mask, scale='log', attached_titl
         curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
         curr_ax.set_xscale(scale)
         # curr_ax.set_yscale('log')
-        curr_ax.set_ylim(ylim)
+        curr_ax.set_yticks(np.linspace(0, ylim[0], 11))
+        curr_ax2.set_yticks(np.linspace(0, ylim[1], 11))
+        curr_ax.set_ylim((0, ylim[0]))
+        curr_ax2.set_ylim((0, ylim[1]))
         if scale == 'log':
             curr_ax.set_xlim([10 ** hist_x_start - 10 ** (hist_x_start-1),
                               10 ** hist_x_end])

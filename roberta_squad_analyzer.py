@@ -19,6 +19,7 @@ import os
 import sys
 import random
 import functools
+import operator
 from subprocess import call
 from math import isnan, fsum, log
 from textwrap import wrap
@@ -130,7 +131,8 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
 
         # aggregrate attention and hidden states
         # MARK: I am only getting values that are zero for the sparsity here. No specific sparsity bar.
-        def get_spars(x, axis): return np.count_nonzero(x == 0.0, axis=axis)
+        def get_spars(x, axis): 
+            return x.shape[-1] ** 2 - np.count_nonzero(x, axis=axis)
         def agg_func(f): return np.stack([f(i, axis=(-2, -1)) for i in att_array], axis=0)
         def add_func(f): return np.sum([f(i, axis=(-2, -1)) for i in att_array], axis=0)
         if res is None:
@@ -164,7 +166,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
                         res['attentions'][layer_idx][head_idx] = np.add(res_head, pred_head)
 
         pipeline_running_counter += 1
-        total_elem_count += sum([att.shape[-2] * att.shape[-1] for att in att_array])
+        total_elem_count += sum([att.shape[-1] * att.shape[-1] for att in att_array])
 
         if (sample_inputs > 0): 
             for i in res['attentions']: 
@@ -673,6 +675,8 @@ if __name__ == '__main__':
                             required=False, help="set sparsity threshold")
     arg_parser.add_argument("-d", "--distribution", default=False, action='store_true',
                             required=False, help="print histogram")
+    arg_parser.add_argument("-e", "--evaluation", default=False, action="store_true",
+                            required=False, help="evaluate model only without any plot")
     arg_parser.add_argument("-m", "--heatmap", default=False, action="store_true",
                             required=False, help="print heatmap")
     arg_parser.add_argument("-s", "--sparsity", default=False, action='store_true',
@@ -687,6 +691,12 @@ if __name__ == '__main__':
     args = vars(arg_parser.parse_args())
     spars_threshold = float(args['threshold'])
     samples = int(args['samples'])
+
+    if args['evaluation']:
+        em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \
+            get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False,
+                               single_input=False, layer_aggregration='mean', spars_threshold=spars_threshold, sample_inputs=samples)
+        em_str = 'EM={:.2f}'.format(em_score*100)
 
     if args['distribution']:
         em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \
