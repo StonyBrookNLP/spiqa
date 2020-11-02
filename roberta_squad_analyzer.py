@@ -132,7 +132,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
         # aggregrate attention and hidden states
         # MARK: I am only getting values that are zero for the sparsity here. No specific sparsity bar.
         def get_spars(x, axis): 
-            return x.shape[-1] ** 2 - np.count_nonzero(x, axis=axis)
+            return x.shape[-1] ** 2 - np.count_nonzero(x[:, :, :x.shape[-1], :], axis=axis)
         def agg_func(f): return np.stack([f(i, axis=(-2, -1)) for i in att_array], axis=0)
         def add_func(f): return np.sum([f(i, axis=(-2, -1)) for i in att_array], axis=0)
         if res is None:
@@ -297,8 +297,7 @@ def get_sparsities(params_path: str, sparsity_bar=0.025, layer_aggregration='mea
                 all_std = np.load(att_stat_file)
                 all_sparsity = np.load(att_stat_file)
 
-        avg_all_sparsity = np.mean(all_sparsity, axis=0)
-        for layer_idx, layer in enumerate(avg_all_sparsity):
+        for layer_idx, layer in enumerate(all_sparsity):
             for head_idx, spars_per_head in enumerate(layer):
                 sparsity_table.at[threshold, 'layer_{}_head_{}'.format(
                     layer_idx, head_idx)] = spars_per_head
