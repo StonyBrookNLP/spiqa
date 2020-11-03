@@ -52,9 +52,8 @@ def get_atten_hist_from_model(model_name: str, num_sentences: int):
         with open(param_file_path + "_hists.npy", "rb") as hists_file:
             hists = np.load(hists_file)
     else:
-        config = AutoConfig.from_pretrained(model_name, output_hidden_states=True, output_attentions=True)
         tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModel.from_config(config)
+        model = AutoModel.from_pretrained(model_name)
         if torch.cuda.is_available(): model = model.to("cuda")
         
         # fetch data:
@@ -67,7 +66,7 @@ def get_atten_hist_from_model(model_name: str, num_sentences: int):
                 input_tokens[i] = input_tokens[i].to("cuda")
               
         with torch.no_grad():
-            model_output = model(**input_tokens)
+            model_output = model(**input_tokens, output_hidden_states=True, output_attentions=True)
         attentions = convert_att_to_np(model_output[3], input_tokens['attention_mask'])
         attn_mask = input_tokens['attention_mask'].cpu().numpy()
         hists = convert_hist_to_np(model_output[2])
@@ -96,25 +95,23 @@ def get_sparse_token(attn):
     return sparse_per_row, sparse_per_row_all
 
 def list_sparse_tokens(model_name, list_file_path="token_spars_list.txt"):
-
     attentions, hists = None, None
 
-    config = AutoConfig.from_pretrained(model_name, output_hidden_states=True, output_attentions=True)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModel.from_config(config)
+    model = AutoModel.from_pretrained(model_name)
     if torch.cuda.is_available(): model = model.to("cuda")
     
     # fetch data:
-    insts = extract_inst_wikipedia(1)
-    # insts = "Here we use only a dummy sentence for the test only so we don't need to touch the real wiki."
-    input_tokens = tokenizer.encode_plus(insts, return_tensors="pt")
+    # insts = extract_inst_wikipedia(1)
+    insts = ["Here we use only a dummy sentence for the test only so we don't need to touch the real wiki."]
+    input_tokens = tokenizer.encode_plus(insts[0], return_tensors="pt")
     # run model
     if torch.cuda.is_available(): 
         for i in input_tokens.keys():
             input_tokens[i] = input_tokens[i].to("cuda")
           
     with torch.no_grad():
-        model_output = model(**input_tokens)
+        model_output = model(**input_tokens, output_hidden_states=True, output_attentions=True)
 
     attentions = convert_att_to_np(model_output[3], input_tokens['attention_mask'])
     hists = convert_hist_to_np(model_output[2])

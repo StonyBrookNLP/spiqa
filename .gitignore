@@ -16,6 +16,7 @@
 # ignore result figs and tables
 *fig_res/
 *.csv
+*.txt
 
 # ignore params
 dropped_attention_params
