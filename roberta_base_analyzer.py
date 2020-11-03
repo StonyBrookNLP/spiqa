@@ -16,10 +16,8 @@ import random
 from textwrap import wrap
 from itertools import compress, product
 
-RES_FIG_PATH = "./res_fig/"
 PARAM_PATH = "./params/"
-DATA_PATH = "./data/"
-FILT_PARAM_PATH = "./filtered_params/"
+DATA_PATH = "./data"
 
 def extract_inst_wikipedia(num_sentences: int):
     dataset = load_dataset("wikipedia", "20200501.en", cache_dir=DATA_PATH)
@@ -29,18 +27,18 @@ def extract_inst_wikipedia(num_sentences: int):
         insts.append(doc.split('\n\n')[0])
     return insts 
 
-def get_atten_hist_from_model(model_name: str, num_sentences: int):
-    # helper func: convert attention to numpy array in 
-    # list of [inst, [layers, heads, rows, cols]]
-    def convert_att_to_np(x, attn_mask):
-        attn_mask = (torch.sum(attn_mask, dim=-1)).cpu().numpy()
-        temp, res = np.asarray([layer.cpu().numpy() for layer in x]), []
-        for i in range(temp.shape[1]):
-            res.append(np.squeeze(temp[:, i, :, :attn_mask[i], :attn_mask[i]]))
-        return res
+# helper func: convert attention to numpy array in 
+# list of [inst, [layers, heads, rows, cols]]
+def convert_att_to_np(x, attn_mask):
+    attn_mask = (torch.sum(attn_mask, dim=-1)).cpu().numpy()
+    temp, res = np.asarray([layer.cpu().numpy() for layer in x]), []
+    for i in range(temp.shape[1]):
+        res.append(np.squeeze(temp[:, i, :, :attn_mask[i], :attn_mask[i]]))
+    return res
 
-    def convert_hist_to_np(x): return np.asarray([layer.cpu().numpy() for layer in x])
-    
+def convert_hist_to_np(x): return np.asarray([layer.cpu().numpy() for layer in x])
+
+def get_atten_hist_from_model(model_name: str, num_sentences: int):
     param_file_path = PARAM_PATH + model_name
 
     attentions, attn_mask, hists = None, None, None
@@ -81,13 +79,60 @@ def get_atten_hist_from_model(model_name: str, num_sentences: int):
             np.save(hists_file, hists, allow_pickle=False)
         
     print ("Shape of attention weight matrices", len(attentions), attentions[0].shape)
-
     return attentions, hists
 
+def get_most_sparse_token(attn):
+    """
+    compute the most sparse token per head, per layer. The input is the attention for one instance 
+    with shape (#layer, #head, length, length)
+    """        
+    sparse_per_row = attn.shape[-1] ** 2 - np.count_nonzero(attn, axis=-1)
+    sparse_per_row_all = \
+        sparse_per_row.transpose((2, 0, 1)).reshape((attn.shape[-2], attn.shape[0] * attn.shape[1]))
+    sparse_per_row = sparse_per_row / attn.shape[-1]
+    sparse_per_row_all = sparse_per_row_all / (attn.shape[-1] * attn.shape[0] * attn.shape[1])
+    return sparse_per_row, sparse_per_row_all
+
+def list_sparse_tokens(model_name):
+
+    attentions, attn_mask, hists = None, None, None
+
+    config = AutoConfig.from_pretrained(model_name, output_hidden_states=True, output_attentions=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModel.from_config(config)
+    if torch.cuda.is_available(): model = model.to("cuda")
+    
+    # fetch data:
+    insts = extract_inst_wikipedia(1)
+    input_tokens = tokenizer.encode_plus(insts, padding=True, return_tensors="pt")
+    print(len(insts), len(input_tokens['input_ids']))
+    # run model
+    if torch.cuda.is_available(): 
+        for i in input_tokens.keys():
+            input_tokens[i] = input_tokens[i].to("cuda")
+          
+    with torch.no_grad():
+        model_output = model(**input_tokens)
+
+    attentions = convert_att_to_np(model_output[3], input_tokens['attention_mask'])
+    hists = convert_hist_to_np(model_output[2])
+
+    for attn in attentions:
+        print(get_most_sparse_token(attn))
+        print(input_tokens)
+    
+    print(tokenizer.decode(input_tokens['input_ids']))
+
 if __name__ == "__main__":
-    attns, hists = get_atten_hist_from_model('roberta-base', 100)
+    list_sparse_tokens("roberta-base")
+
+    attns, hists = get_atten_hist_from_model('roberta-base', 10)
     attn_mask = [i.shape[-1] for i in attns]
     print(hists.shape, len(attn_mask))
+    # attention sparsity check
+    insts_sparsity = [(i.shape[-1] ** 2 - np.count_nonzero(i, axis=(-2, -1))) / float(i.shape[-1] ** 2) for i in attns]
+    for i in insts_sparsity: print(i)
+
     # h_state sanity check
     for i in range(10):
         print("h_state mean:{:.4f}, std:{:.4f}".format(
