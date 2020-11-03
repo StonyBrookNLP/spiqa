@@ -7,6 +7,7 @@ from transformers import AutoConfig, AutoTokenizer, AutoModel
 from datasets import load_dataset
 import torch
 import numpy as np
+import pandas as pd
 import transformer_visualization as tv
 
 import argparse as ag
@@ -81,21 +82,22 @@ def get_atten_hist_from_model(model_name: str, num_sentences: int):
     print ("Shape of attention weight matrices", len(attentions), attentions[0].shape)
     return attentions, hists
 
-def get_most_sparse_token(attn):
+def get_sparse_token(attn):
     """
     compute the most sparse token per head, per layer. The input is the attention for one instance 
     with shape (#layer, #head, length, length)
     """        
-    sparse_per_row = attn.shape[-1] ** 2 - np.count_nonzero(attn, axis=-1)
+    sparse_per_row = attn.shape[-1] - np.count_nonzero(attn, axis=-1)
     sparse_per_row_all = \
         sparse_per_row.transpose((2, 0, 1)).reshape((attn.shape[-2], attn.shape[0] * attn.shape[1]))
+    sparse_per_row_all = np.sum(sparse_per_row_all, axis=-1)
     sparse_per_row = sparse_per_row / attn.shape[-1]
     sparse_per_row_all = sparse_per_row_all / (attn.shape[-1] * attn.shape[0] * attn.shape[1])
     return sparse_per_row, sparse_per_row_all
 
-def list_sparse_tokens(model_name):
+def list_sparse_tokens(model_name, list_file_path="token_spars_list.txt"):
 
-    attentions, attn_mask, hists = None, None, None
+    attentions, hists = None, None
 
     config = AutoConfig.from_pretrained(model_name, output_hidden_states=True, output_attentions=True)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -104,8 +106,8 @@ def list_sparse_tokens(model_name):
     
     # fetch data:
     insts = extract_inst_wikipedia(1)
-    input_tokens = tokenizer.encode_plus(insts, padding=True, return_tensors="pt")
-    print(len(insts), len(input_tokens['input_ids']))
+    # insts = "Here we use only a dummy sentence for the test only so we don't need to touch the real wiki."
+    input_tokens = tokenizer.encode_plus(insts, return_tensors="pt")
     # run model
     if torch.cuda.is_available(): 
         for i in input_tokens.keys():
@@ -117,14 +119,17 @@ def list_sparse_tokens(model_name):
     attentions = convert_att_to_np(model_output[3], input_tokens['attention_mask'])
     hists = convert_hist_to_np(model_output[2])
 
-    for attn in attentions:
-        print(get_most_sparse_token(attn))
-        print(input_tokens)
-    
-    print(tokenizer.decode(input_tokens['input_ids']))
+    for idx, attn in enumerate(attentions):
+        tokens = [tokenizer.decode([i]) for i in input_tokens['input_ids'][idx]]
+        sparsity = get_sparse_token(attn)[1]
+        spars_list = pd.DataFrame({'tokens': tokens, 'sparsity_all': sparsity})
+        with open(list_file_path, 'a+') as f:
+            f.write(spars_list.sort_values('sparsity_all', ascending=False).to_string(index=False))
 
+    
 if __name__ == "__main__":
     list_sparse_tokens("roberta-base")
+    exit()
 
     attns, hists = get_atten_hist_from_model('roberta-base', 10)
     attn_mask = [i.shape[-1] for i in attns]
