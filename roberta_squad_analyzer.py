@@ -502,7 +502,7 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_t
 
             for att in prediction['attentions']:
                 flat_att = att.reshape(*att.shape[:2], -1)
-                curr_hist = np.apply_along_axis(lambda a: np.histogram(a+offset, atten_bins)[0], -1, att)
+                curr_hist = np.apply_along_axis(lambda a: np.histogram(a+offset, atten_bins)[0], -1, att[:, :, :att.shape[-1], :])
                 atten_hist = [curr_hist] if atten_hist is None else atten_hist + [curr_hist]
                 curr_sparse_count = np.apply_along_axis(lambda a: (a <= sparsity_bar).sum(), -1, flat_att)
                 all_sparse_count = curr_sparse_count if all_sparse_count is None \

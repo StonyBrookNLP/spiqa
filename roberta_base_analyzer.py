@@ -22,6 +22,7 @@ DATA_PATH = "./data"
 
 def extract_inst_wikipedia(num_sentences: int):
     dataset = load_dataset("wikipedia", "20200501.en", cache_dir=DATA_PATH)
+    random.seed(12331)
     dataset = random.sample(dataset['train']['text'], num_sentences)
     insts = []
     for doc in dataset:
@@ -81,20 +82,20 @@ def get_atten_hist_from_model(model_name: str, num_sentences: int):
     print ("Shape of attention weight matrices", len(attentions), attentions[0].shape)
     return attentions, hists
 
-def get_sparse_token(attn):
+def get_sparse_token(attn, sparsity_bar):
     """
     compute the most sparse token per head, per layer. The input is the attention for one instance 
     with shape (#layer, #head, length, length)
     """        
-    sparse_per_row = attn.shape[-1] - np.count_nonzero(attn, axis=-1)
+    sparse_per_row = np.count_nonzero(attn <= sparsity_bar, axis=(1, -1))
     sparse_per_row_all = \
-        sparse_per_row.transpose((2, 0, 1)).reshape((attn.shape[-2], attn.shape[0] * attn.shape[1]))
+        sparse_per_row.transpose((1, 0))
     sparse_per_row_all = np.sum(sparse_per_row_all, axis=-1)
-    sparse_per_row = sparse_per_row / attn.shape[-1]
+    sparse_per_row = sparse_per_row / (attn.shape[-1] * attn.shape[1])
     sparse_per_row_all = sparse_per_row_all / (attn.shape[-1] * attn.shape[0] * attn.shape[1])
     return sparse_per_row, sparse_per_row_all
 
-def list_sparse_tokens(model_name, list_file_path="token_spars_list.txt"):
+def list_sparse_tokens(model_name, sparsity_bar=0.0, num_sentences=1):
     attentions, hists = None, None
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -102,42 +103,44 @@ def list_sparse_tokens(model_name, list_file_path="token_spars_list.txt"):
     if torch.cuda.is_available(): model = model.to("cuda")
     
     # fetch data:
-    # insts = extract_inst_wikipedia(1)
-    insts = ["Here we use only a dummy sentence for the test only so we don't need to touch the real wiki."]
-    input_tokens = tokenizer.encode_plus(insts[0], return_tensors="pt")
-    # run model
-    if torch.cuda.is_available(): 
-        for i in input_tokens.keys():
-            input_tokens[i] = input_tokens[i].to("cuda")
-          
-    with torch.no_grad():
-        model_output = model(**input_tokens, output_hidden_states=True, output_attentions=True)
+    insts = extract_inst_wikipedia(num_sentences)
+    # insts = ["The girl ran to a local pub to escape the din of her city."]
 
-    attentions = convert_att_to_np(model_output[3], input_tokens['attention_mask'])
-    hists = convert_hist_to_np(model_output[2])
+    for inst_idx, inst in enumerate(insts):
+        input_tokens = tokenizer.encode_plus(inst, return_tensors="pt")
+        # run model
+        if torch.cuda.is_available(): 
+            for i in input_tokens.keys():
+                input_tokens[i] = input_tokens[i].to("cuda")
+            
+        with torch.no_grad():
+            model_output = model(**input_tokens, output_hidden_states=True, output_attentions=True)
 
-    for idx, attn in enumerate(attentions):
-        tokens = [tokenizer.decode([i]) for i in input_tokens['input_ids'][idx]]
-        sparsity = get_sparse_token(attn)[1]
-        spars_list = pd.DataFrame({'tokens': tokens, 'sparsity_all': sparsity})
-        with open(list_file_path, 'a+') as f:
-            f.write(spars_list.sort_values('sparsity_all', ascending=False).to_string(index=False))
+        attentions = convert_att_to_np(model_output[3], input_tokens['attention_mask'])
+        hists = convert_hist_to_np(model_output[2])
+
+        sparse_table_path = "token_spars_list{}.txt".format(inst_idx)
+
+        for idx, attn in enumerate(attentions):
+            tokens = [tokenizer.decode([i]) for i in input_tokens['input_ids'][idx]]
+            sparsity_per_layer, sparsity_all = get_sparse_token(attn, sparsity_bar)
+            spars_list = pd.DataFrame({'tokens': tokens, 'sparsity_all': sparsity_all})
+            for layer in range(sparsity_per_layer.shape[0]):
+                spars_list['layer_{}'.format(layer)] = sparsity_per_layer[layer]
+            with open(sparse_table_path, 'w+') as f:
+                f.write(spars_list.sort_values('sparsity_all', ascending=False).to_string())
 
     
 if __name__ == "__main__":
-    list_sparse_tokens("roberta-base")
-    exit()
-
+    list_sparse_tokens("roberta-base", sparsity_bar=0.0, num_sentences=5)
+    list_sparse_tokens("roberta-base", sparsity_bar=0.0005, num_sentences=5)
     attns, hists = get_atten_hist_from_model('roberta-base', 10)
     attn_mask = [i.shape[-1] for i in attns]
     print(hists.shape, len(attn_mask))
-    # attention sparsity check
-    insts_sparsity = [(i.shape[-1] ** 2 - np.count_nonzero(i, axis=(-2, -1))) / float(i.shape[-1] ** 2) for i in attns]
-    for i in insts_sparsity: print(i)
 
     # h_state sanity check
     for i in range(10):
         print("h_state mean:{:.4f}, std:{:.4f}".format(
             np.mean(hists[0][0][i*5], axis=-1), np.std(hists[0][0][i*5], axis=-1)))
-    # tv.plot_atten_dist_per_token(attns, 100)
+    tv.plot_atten_dist_per_token(attns, 100)
     tv.plot_hs_dist_per_token(hists, 100, attn_mask, scale='linear')
