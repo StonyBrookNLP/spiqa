@@ -103,8 +103,8 @@ def list_sparse_tokens(model_name, sparsity_bar=0.0, num_sentences=1):
     if torch.cuda.is_available(): model = model.to("cuda")
     
     # fetch data:
-    insts = extract_inst_wikipedia(num_sentences)
-    # insts = ["The girl ran to a local pub to escape the din of her city."]
+    # insts = extract_inst_wikipedia(num_sentences)
+    insts = ["The girl ran to a local pub to escape the din of her city."]
 
     for inst_idx, inst in enumerate(insts):
         input_tokens = tokenizer.encode_plus(inst, return_tensors="pt")
@@ -120,17 +120,19 @@ def list_sparse_tokens(model_name, sparsity_bar=0.0, num_sentences=1):
         hists = convert_hist_to_np(model_output[2])
 
         sparse_table_path = "token_spars_list{}.txt".format(inst_idx)
-
-        for idx, attn in enumerate(attentions):
-            tokens = [tokenizer.decode([i]) for i in input_tokens['input_ids'][idx]]
-            sparsity_per_layer, sparsity_all = get_sparse_token(attn, sparsity_bar)
-            spars_list = pd.DataFrame({'tokens': tokens, 'sparsity_all': sparsity_all})
-            for layer in range(sparsity_per_layer.shape[0]):
-                spars_list['layer_{}'.format(layer)] = sparsity_per_layer[layer]
-            with open(sparse_table_path, 'w+') as f:
+        with open(sparse_table_path, 'w+') as f:
+            for idx, attn in enumerate(attentions):
+                tokens = [tokenizer.decode([i]) for i in input_tokens['input_ids'][idx]]
+                sparsity_per_layer, sparsity_all = get_sparse_token(attn, sparsity_bar)
+                spars_list = pd.DataFrame({'tokens': tokens, 'sparsity_all': sparsity_all})
+                for layer in range(sparsity_per_layer.shape[0]):
+                    spars_list['layer_{}'.format(layer)] = sparsity_per_layer[layer]
                 f.write(spars_list.sort_values('sparsity_all', ascending=False).to_string())
+            
+            f.write("\n-------------\n")
+            f.write(inst)
 
-    
+
 if __name__ == "__main__":
     list_sparse_tokens("roberta-base", sparsity_bar=0.0, num_sentences=5)
     list_sparse_tokens("roberta-base", sparsity_bar=0.0005, num_sentences=5)
