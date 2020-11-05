@@ -71,7 +71,7 @@ def parse_squad_json(squad_ver='v1.1'):
     return data
 
 
-def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, sample_inputs=-1, spars_threshold=0.0):
+def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, sample_inputs=-1, att_threshold=0.0, hs_threshold=0.0):
     '''
     run question answering pipeline. 
     filter inputs: filter out the question-context pairs that have lengths out of 
@@ -124,7 +124,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
     for qa_pair in fed_data:
         print("running pipeline iter {}/{}...".format(pipeline_running_counter, fed_data_len))
         prediction = qa_pipeline(
-            {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=MAX_SEQ_LEN, spars_threshold=spars_threshold)
+            {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=MAX_SEQ_LEN, att_threshold=att_threshold, hs_threshold=hs_threshold)
         em_score = max(compute_exact(prediction['answer'], gold_ans)
                        for gold_ans in qa_pair['answers'])
         att_array = prediction['attentions']
@@ -183,7 +183,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
     return res
 
 
-def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True, single_input=True, sample_inputs=-1, layer_aggregration='mean', spars_threshold=0.0):
+def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True, single_input=True, sample_inputs=-1, layer_aggregration='mean', att_threshold=0.0, hs_threshold = 0.0):
     '''
     get the hidden state and attention from pipeline result. 
     The model_name should be a valid Huggingface transformer model. 
@@ -230,7 +230,8 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
     else:
         print("Extracting attentions from model...")
         predictions = run_qa_pipeline(
-            model_name, filter_inputs=filter_inputs, single_input=single_input, sample_inputs=sample_inputs, spars_threshold=spars_threshold)
+            model_name, filter_inputs=filter_inputs, single_input=single_input, \
+            sample_inputs=sample_inputs, att_threshold=att_threshold, hs_threshold=hs_threshold)
 
         total_score, all_hidden_states, all_attentions, qa_pair_count, \
             all_max, all_min, all_mean, all_std, all_sparsity = \
@@ -495,7 +496,7 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_t
         for qa_pair in associated_data:
             print("running pipeline iter {}/{}...".format(pipeline_running_counter, fed_data_len))
             prediction = qa_pipeline(
-                {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=320, spars_threshold=0.0)
+                {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=320, att_threshold=0.0)
             pipeline_running_counter += 1
             em_score = max(compute_exact(prediction['answer'], gold_ans)
                            for gold_ans in qa_pair['answers'])
@@ -569,18 +570,18 @@ def plot_sparsity_change(data, attached_title=''):
     '''
     plot sparsity change for different sparsity dropout threshold
     '''
-    spars_threshold = [float(i) for i in data.index.tolist()]
+    att_threshold = [float(i) for i in data.index.tolist()]
     for layer_idx in range(0, 12):
         print('plotting curve for sparsities...')
         fig, ax = plt.subplots(3, 4, figsize=(21, 12))
         for head_idx in range(0, 12):
             curr_ax = ax[int(head_idx/4), int(head_idx % 4)]
-            curr_ax.plot(spars_threshold, data['layer_{}_head_{}'.format(
+            curr_ax.plot(att_threshold, data['layer_{}_head_{}'.format(
                 layer_idx, head_idx)].tolist(), color='C0', marker='s')
             curr_ax.set_title('head {}'.format(head_idx))
             curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
             curr_ax.set_ylim([0.0, 1.01])
-            curr_ax.set_xlim(0.0, max(spars_threshold)+0.01)
+            curr_ax.set_xlim(0.0, max(att_threshold)+0.01)
 
         fig.suptitle('Sparsity for Different Thresholds for Layer {} {}'.format(
             layer_idx, attached_title), fontsize=21, y=0.99)
@@ -600,10 +601,10 @@ def plot_sparsity_change(data, attached_title=''):
 
     ax1.set_xlabel('sparsity dropping threshold')
     ax1.set_ylabel('sparsity')
-    ax1.plot(spars_threshold, data['all'], color='C0', marker='s', markersize='4.5')
+    ax1.plot(att_threshold, data['all'], color='C0', marker='s', markersize='4.5')
     ax2 = ax1.twinx()
     ax2.set_ylabel('EM score')
-    ax2.plot(spars_threshold, data['em']*100, color='C1', marker='s', markersize='4.5')
+    ax2.plot(att_threshold, data['em']*100, color='C1', marker='s', markersize='4.5')
     ax1.set_yticks(np.linspace(0.2, 1.1, 10))
     ax1.set_ylim([0.2, 1.1])
     ax2.set_yticks(np.linspace(20, 110, 10))
@@ -670,8 +671,10 @@ def plot_stat_features(stat_features, features_to_plot=['max', 'min', 'std']):
 
 if __name__ == '__main__':
     arg_parser = ag.ArgumentParser(description=__doc__)
-    arg_parser.add_argument("-t", "--threshold", default=0.0,
-                            required=False, help="set sparsity threshold")
+    arg_parser.add_argument("-at", "--att_threshold", default=0.0,
+                            required=False, help="set attention sparsity threshold")
+    arg_parser.add_argument("-ht", "--hs_threshold", default=0.0,
+                            required=False, help="set hidden states sparsity threshold")
     arg_parser.add_argument("-d", "--distribution", default=False, action='store_true',
                             required=False, help="print histogram")
     arg_parser.add_argument("-e", "--evaluation", default=False, action="store_true",
@@ -688,19 +691,20 @@ if __name__ == '__main__':
                             required=False, help="number of samples for distribution")
 
     args = vars(arg_parser.parse_args())
-    spars_threshold = float(args['threshold'])
+    att_threshold = float(args['att_threshold'])
+    hs_threshold = float(args['hs_threshold'])
     samples = int(args['samples'])
 
     if args['evaluation']:
         em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \
             get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False,
-                               single_input=False, layer_aggregration='mean', spars_threshold=spars_threshold, sample_inputs=samples)
+                               single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples)
         em_str = 'EM={:.2f}'.format(em_score*100)
 
     if args['distribution']:
         em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \
             get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False,
-                               single_input=False, layer_aggregration='mean', spars_threshold=spars_threshold, sample_inputs=samples)
+                               single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples)
         em_str = 'EM={:.2f}'.format(em_score*100)
         stat_features = get_stat_features(
             {'max': att_max, 'min': att_min, 'mean': att_mean, 'std': att_std})
@@ -741,10 +745,10 @@ if __name__ == '__main__':
     if args['hidden_states']:
         em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \
             get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False,
-                               single_input=False, layer_aggregration='mean', spars_threshold=spars_threshold, sample_inputs=samples)
+                               single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples)
         attn_mask = [i.shape[-1] for i in attens]
         # h_state sanity check
-        for i in range(10):
-            print("h_state mean:{:.4f}, std:{:.4f}".format(
-                np.mean(h_states[0][0][i*5], axis=-1), np.std(h_states[0][0][i*5], axis=-1)))
+        # for i in range(10):
+        #     print("h_state mean:{:.4f}, std:{:.4f}".format(
+        #         np.mean(h_states[0][0][i*5], axis=-1), np.std(h_states[0][0][i*5], axis=-1)))
         tv.plot_hs_dist_per_token(h_states, 100, attn_mask, scale='linear')

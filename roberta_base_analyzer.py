@@ -103,8 +103,8 @@ def list_sparse_tokens(model_name, sparsity_bar=0.0, num_sentences=1):
     if torch.cuda.is_available(): model = model.to("cuda")
     
     # fetch data:
-    # insts = extract_inst_wikipedia(num_sentences)
-    insts = ["The girl ran to a local pub to escape the din of her city."]
+    insts = extract_inst_wikipedia(num_sentences)
+    # insts = ["The girl ran to a local pub to escape the din of her city."]
 
     for inst_idx, inst in enumerate(insts):
         input_tokens = tokenizer.encode_plus(inst, return_tensors="pt")
