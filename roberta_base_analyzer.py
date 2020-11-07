@@ -82,7 +82,11 @@ def get_atten_hist_from_model(model_name: str, num_sentences: int):
     print ("Shape of attention weight matrices", len(attentions), attentions[0].shape)
     return attentions, hists
 
-def get_sparse_token(attn, sparsity_bar):
+def attn_head_row_count(attn): return attn.shape[-1] * attn.shape[1]
+
+def attn_token_layer_count(attn): return attn_head_row_count(attn) * attn.shape[0]
+
+def get_sparse_token(attn, sparsity_bar, return_count=False):
     """
     compute the most sparse token per head, per layer. The input is the attention for one instance 
     with shape (#layer, #head, length, length)
@@ -91,11 +95,13 @@ def get_sparse_token(attn, sparsity_bar):
     sparse_per_row_all = \
         sparse_per_row.transpose((1, 0))
     sparse_per_row_all = np.sum(sparse_per_row_all, axis=-1)
-    sparse_per_row = sparse_per_row / (attn.shape[-1] * attn.shape[1])
-    sparse_per_row_all = sparse_per_row_all / (attn.shape[-1] * attn.shape[0] * attn.shape[1])
+    if not return_count:
+        sparse_per_row = sparse_per_row / attn_head_row_count(attn)
+        sparse_per_row_all = sparse_per_row_all / attn_token_layer_count(attn)
+    
     return sparse_per_row, sparse_per_row_all
 
-def list_sparse_tokens(model_name, sparsity_bar=0.0, num_sentences=1):
+def list_sparse_tokens_per_inst(model_name, sparsity_bar=0.0, num_sentences=1):
     attentions, hists = None, None
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -132,10 +138,50 @@ def list_sparse_tokens(model_name, sparsity_bar=0.0, num_sentences=1):
             f.write("\n-------------\n")
             f.write(inst)
 
+def list_sparse_tokens_all(model_name, sparsity_bar=0.0, num_sentences=500):
+    attentions = None
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModel.from_pretrained(model_name)
+    if torch.cuda.is_available(): model = model.to("cuda")
+    
+    # fetch data:
+    insts = extract_inst_wikipedia(num_sentences)
+    # insts = ["The girl ran to a local pub to escape the din of her city.", 
+    #         "I am a robot writing fantastic articles just like human-being.", 
+    #         "Today is a beautiful day at new england area."]
+
+    sparse_count_list = {}
+    for inst_idx, inst in enumerate(insts):
+        input_tokens = tokenizer.encode_plus(inst, return_tensors="pt")
+        # run model
+        if torch.cuda.is_available(): 
+            for i in input_tokens.keys():
+                input_tokens[i] = input_tokens[i].to("cuda")
+            
+        with torch.no_grad():
+            model_output = model(**input_tokens, output_hidden_states=True, output_attentions=True)
+
+        attentions = convert_att_to_np(model_output[3], input_tokens['attention_mask'])
+
+        for tokens, attn in zip(input_tokens['input_ids'], attentions):
+            _, sparsity_all = get_sparse_token(attn, sparsity_bar, return_count=True)
+            for token, sparse_count in zip(tokens, sparsity_all):
+                token_str = tokenizer.decode([token])
+                sparse_count_list[token_str] = (sparse_count_list.get(token_str, (0, 0))[0] + sparse_count, 
+                                            sparse_count_list.get(token_str, (0, 0))[1] + attn_token_layer_count(attn))
+
+
+    with open("token_sparse_list_all.txt", "w+", newline="") as f:
+        token_sparse_list = pd.DataFrame({'tokens': sparse_count_list.keys(), 
+                                            'sparsity_all': [float(i[0])/float(i[1]) for i in sparse_count_list.values()]})
+        f.write(token_sparse_list.sort_values('sparsity_all', ascending=False).to_string())
+
 
 if __name__ == "__main__":
-    list_sparse_tokens("roberta-base", sparsity_bar=0.0, num_sentences=5)
-    list_sparse_tokens("roberta-base", sparsity_bar=0.0005, num_sentences=5)
+    list_sparse_tokens_all("roberta-base", sparsity_bar=0.000001, num_sentences=3)
+    exit()
+
     attns, hists = get_atten_hist_from_model('roberta-base', 10)
     attn_mask = [i.shape[-1] for i in attns]
     print(hists.shape, len(attn_mask))

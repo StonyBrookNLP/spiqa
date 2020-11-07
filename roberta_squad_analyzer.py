@@ -737,7 +737,7 @@ if __name__ == '__main__':
         dyna_filtered_spars = get_sparsities('filtered_params/dyna')
         print(stat_filtered_spars, dyna_filtered_spars)
         plot_em_sparsity({'static': stat_filtered_spars, 'dynamic': dyna_filtered_spars})
-        plot_sparsity_change(dyna_filtered_spars, attached_title='(dynamic threshold)')
+        plot_sparsity_change(stat_filtered_spars, attached_title='(dynamic threshold)')
 
     if args['otf_distribution']:
         plot_dist_token_dynamic("csarron/roberta-base-squad-v1", 100, 0.0, samples=samples, scale='log', attached_title='(per_token)')
