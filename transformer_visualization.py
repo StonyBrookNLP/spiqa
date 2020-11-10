@@ -71,7 +71,7 @@ def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True, laye
         plt.close(fig)
 
 
-def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, scale='log', attached_title='', ylim=(0.2, 1)):
+def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, sparse_hist=None, scale='log', attached_title='', ylim=(0.2, 1)):
     """
     plotting the attention histogram per token, stacking all plots together.
     accepted data: a list of attention matrices, with each as [layer, head, length, length]
@@ -81,7 +81,7 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, scal
     attn_max and attn_min are not required when data is a list of matrice
     """
     offset = 1e-8
-    hist_x_start, hist_x_end = log(offset, 10), log(1+offset, 10)
+    hist_x_start, hist_x_end = log(offset, 10), log(1, 10)
     if scale == 'linear':
         offset = 0.0
 
@@ -122,6 +122,12 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, scal
                 curr_ax2.plot(attn_bins[:-1], np.cumsum(row),
                              color='C3', linewidth=0.5, linestyle='-', alpha=alpha_val)
 
+            # plot sparse hist if exist:
+            if sparse_hist is not None:
+                for bin_idx, token_count in enumerate(sparse_hist[layer_idx][head_idx]):
+                    curr_ax2.bar(0.5, height=0.1, width=0.5, bottom=bin_idx*0.1, \
+                        color='r', alpha=token_count, linewidth=0.3, linestyle='-')
+
             subplot_title = 'head_{}, max: {:.4f}, min: {:.4f}'.format(
                 head_idx, attn_max[layer_idx][head_idx], attn_min[layer_idx][head_idx])
 
@@ -134,8 +140,7 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, scal
             curr_ax.set_ylim((0, ylim[0]))
             curr_ax2.set_ylim((0, ylim[1]))
             if scale == 'log':
-                curr_ax.set_xlim([10 ** hist_x_start - 10 ** (hist_x_start-1),
-                                  10 ** hist_x_end])
+                curr_ax.set_xlim([10 ** hist_x_start - 10 ** (hist_x_start-1), 1])
             else:
                 curr_ax.set_xlim([0, 0.02])
 

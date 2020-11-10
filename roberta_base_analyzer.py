@@ -43,7 +43,7 @@ def convert_hist_to_np(x): return np.asarray([layer.cpu().numpy() for layer in x
 def get_atten_hist_from_model(model_name: str, num_sentences: int):
     param_file_path = PARAM_PATH + model_name
 
-    attentions, attn_mask, hists = None, None, None
+    attentions, attn_mask, hists, sparse_hist = None, None, None, None
     if os.path.isfile(param_file_path + "_attention.npy"):
         print("loading parameters from file...")
         with open(param_file_path + "_attention_mask.npy", "rb") as att_mask_file:
@@ -81,6 +81,19 @@ def get_atten_hist_from_model(model_name: str, num_sentences: int):
         
     print ("Shape of attention weight matrices", len(attentions), attentions[0].shape)
     return attentions, hists
+
+
+def get_sparse_hist_token(attn, offset, sparsity_bar=0.0):
+    all_sparse_count = None
+    for att in attn:
+        curr_sparse_count = np.apply_along_axis(lambda a: float((a <= (sparsity_bar + offset)).sum()) / att.shape[-1], -1, att)
+        all_sparse_count = curr_sparse_count if all_sparse_count is None \
+                                else np.concatenate((curr_sparse_count, all_sparse_count), axis=-1)
+    
+    sparse_hist = np.apply_along_axis(lambda a: np.histogram(a, bins=10, range=(0.0, 1.0))[0], -1, all_sparse_count)
+    sparse_hist = np.apply_along_axis(lambda a: a / np.sum(a), -1, sparse_hist)
+    return sparse_hist
+
 
 def attn_head_row_count(attn): return attn.shape[-1] * attn.shape[1]
 
@@ -184,8 +197,7 @@ def list_sparse_tokens_all(model_name, sparsity_bar=0.0, num_sentences=500):
 
 
 if __name__ == "__main__":
-    list_sparse_tokens_all("roberta-base", sparsity_bar=1e-8, num_sentences=8000)
-    exit()
+    # list_sparse_tokens_all("roberta-base", sparsity_bar=1e-8, num_sentences=8000)
 
     attns, hists = get_atten_hist_from_model('roberta-base', 10)
     attn_mask = [i.shape[-1] for i in attns]
@@ -195,5 +207,5 @@ if __name__ == "__main__":
     for i in range(10):
         print("h_state mean:{:.4f}, std:{:.4f}".format(
             np.mean(hists[0][0][i*5], axis=-1), np.std(hists[0][0][i*5], axis=-1)))
-    tv.plot_atten_dist_per_token(attns, 100)
+    tv.plot_atten_dist_per_token(attns, 100, sparse_hist=get_sparse_hist_token(attns, 1e-8))
     tv.plot_hs_dist_per_token(hists, 100, attn_mask, scale='linear')

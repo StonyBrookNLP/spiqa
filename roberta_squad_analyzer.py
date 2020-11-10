@@ -464,7 +464,7 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
     hist_file_path = PARAM_PATH + "atten_hist{}.npy".format(file_type)
 
     atten_bins, atten_hist, all_score = get_bin_edges(bin_step), None, 0
-    all_max, all_min, all_sparse_count, all_seq_len = None, None, None, None
+    all_max, all_min, all_sparse_count, sparse_hist, all_seq_len = None, None, None, None, None
 
     if os.path.isfile(hist_file_path):
         print("loading histogram from ", hist_file_path)
@@ -475,6 +475,7 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
             all_max = np.load(hist_file)
             all_min = np.load(hist_file)
             all_sparse_count = np.load(hist_file)
+            sparse_hist = np.load(hist_file)
     else:
         print("Running pipeline...")
         data = parse_squad_json()
@@ -502,12 +503,12 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
                            for gold_ans in qa_pair['answers'])
 
             for att in prediction['attentions']:
-                flat_att = att.reshape(*att.shape[:2], -1)
-                curr_hist = np.apply_along_axis(lambda a: np.histogram(a+offset, atten_bins)[0], -1, att[:, :, :att.shape[-1], :])
+                att = att[:, :, :att.shape[-1], :]
+                curr_hist = np.apply_along_axis(lambda a: np.histogram(a+offset, atten_bins)[0], -1, att)
                 atten_hist = [curr_hist] if atten_hist is None else atten_hist + [curr_hist]
-                curr_sparse_count = np.apply_along_axis(lambda a: (a <= sparsity_bar).sum(), -1, flat_att)
+                curr_sparse_count = np.apply_along_axis(lambda a: float((a <= (sparsity_bar + offset)).sum()) / att.shape[-1], -1, att)
                 all_sparse_count = curr_sparse_count if all_sparse_count is None \
-                                    else np.add(curr_sparse_count, all_sparse_count) 
+                                    else np.concatenate((curr_sparse_count, all_sparse_count), axis=-1)
                 all_seq_len = [att.shape[-1]] if all_seq_len is None else all_seq_len + [att.shape[-1]]
                 curr_max, curr_min = np.amax(att, axis=(-2, -1)), np.amin(att, axis=(-2, -1))
 
@@ -515,16 +516,18 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
             all_max = curr_max if all_max is None else np.maximum(all_max, curr_max)
             all_min = curr_min if all_min is None else np.minimum(all_min, curr_min)
 
-        all_sparse_count = all_sparse_count.astype(float) / (sum(all_seq_len) * ATT_SIZE[2])
         atten_hist = np.concatenate(atten_hist, axis=-2)
+        sparse_hist = np.apply_along_axis(lambda a: np.histogram(a, bins=10, range=(0.0, 1.0))[0], -1, all_sparse_count)
         
         print("atten_hist shape:", atten_hist.shape)
         print("sparsity shape:", all_sparse_count.shape)
+        print("sparsity hist shape:", sparse_hist.shape)
         print("all seq shape:", len(all_seq_len))
         print("EM score", all_score / fed_data_len)
 
         # Normalization
         atten_hist = np.apply_along_axis(lambda a: a / np.sum(a), -1, atten_hist)
+        sparse_hist = np.apply_along_axis(lambda a: a / np.sum(a), -1, sparse_hist)
         # save the histogram
         with open(hist_file_path, "wb+") as hist_file:
             np.save(hist_file, atten_hist, allow_pickle=False)
@@ -533,9 +536,10 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
             np.save(hist_file, all_max, allow_pickle=False)
             np.save(hist_file, all_min, allow_pickle=False)
             np.save(hist_file, all_sparse_count, allow_pickle=False)
+            np.save(hist_file, sparse_hist, allow_pickle=False)
 
     # plot atten_hist
-    tv.plot_atten_dist_per_token(atten_hist, bin_step, all_max, all_min)
+    tv.plot_atten_dist_per_token(atten_hist, bin_step, all_max, all_min, sparse_hist=sparse_hist)
 
     # plot sparsity histogram when sampling:
     # if samples > 0:
