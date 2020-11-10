@@ -425,7 +425,7 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
         plt.close(fig)
 
 
-def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_title='', samples=10, scale='log'):
+def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_threshold=0.0, attached_title='', samples=10, scale='log'):
     '''
     computing histogram per token on-the-fly without saving the attentions in the memory
     '''
@@ -496,7 +496,7 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, attached_t
         for qa_pair in associated_data:
             print("running pipeline iter {}/{}...".format(pipeline_running_counter, fed_data_len))
             prediction = qa_pipeline(
-                {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=320, att_threshold=0.0)
+                {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=320, att_threshold=att_threshold)
             pipeline_running_counter += 1
             em_score = max(compute_exact(prediction['answer'], gold_ans)
                            for gold_ans in qa_pair['answers'])
@@ -740,7 +740,7 @@ if __name__ == '__main__':
         plot_sparsity_change(stat_filtered_spars, attached_title='(dynamic threshold)')
 
     if args['otf_distribution']:
-        plot_dist_token_dynamic("csarron/roberta-base-squad-v1", 100, 0.0, samples=samples, scale='log', attached_title='(per_token)')
+        plot_dist_token_dynamic("csarron/roberta-base-squad-v1", 100, sparsity_bar=0.0, att_threshold=att_threshold, samples=samples, scale='log', attached_title='(per_token)')
 
     if args['hidden_states']:
         em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \

@@ -153,7 +153,9 @@ def list_sparse_tokens_all(model_name, sparsity_bar=0.0, num_sentences=500):
 
     sparse_count_list = {}
     for inst_idx, inst in enumerate(insts):
-        input_tokens = tokenizer.encode_plus(inst, return_tensors="pt")
+        input_tokens = tokenizer.encode_plus(inst, add_special_tokens=True, return_tensors="pt")
+        if input_tokens['input_ids'].size()[-1] > 512:
+            continue
         # run model
         if torch.cuda.is_available(): 
             for i in input_tokens.keys():
@@ -167,19 +169,22 @@ def list_sparse_tokens_all(model_name, sparsity_bar=0.0, num_sentences=500):
         for tokens, attn in zip(input_tokens['input_ids'], attentions):
             _, sparsity_all = get_sparse_token(attn, sparsity_bar, return_count=True)
             for token, sparse_count in zip(tokens, sparsity_all):
-                token_str = tokenizer.decode([token])
+                token_str = tokenizer.decode([token]).replace(' ', '')
                 sparse_count_list[token_str] = (sparse_count_list.get(token_str, (0, 0))[0] + sparse_count, 
                                             sparse_count_list.get(token_str, (0, 0))[1] + attn_token_layer_count(attn))
 
 
     with open("token_sparse_list_all.txt", "w+", newline="") as f:
-        token_sparse_list = pd.DataFrame({'tokens': sparse_count_list.keys(), 
-                                            'sparsity_all': [float(i[0])/float(i[1]) for i in sparse_count_list.values()]})
-        f.write(token_sparse_list.sort_values('sparsity_all', ascending=False).to_string())
+        token_sparse_list = pd.DataFrame({'tokens': sparse_count_list.keys(),
+                                            'sparse_count': [i[0] for i in list(sparse_count_list.values())],
+                                            'all_count': [i[1] for i in list(sparse_count_list.values())],
+                                            'sparsity_all': [float(i[0])/float(i[1]) for i in list(sparse_count_list.values())]})
+        listed_tokens = token_sparse_list[token_sparse_list['all_count'] > token_sparse_list['all_count'].nlargest(71).iloc[-1]]
+        f.write(listed_tokens.sort_values('sparsity_all', ascending=False).to_string())
 
 
 if __name__ == "__main__":
-    list_sparse_tokens_all("roberta-base", sparsity_bar=0.000001, num_sentences=3)
+    list_sparse_tokens_all("roberta-base", sparsity_bar=1e-8, num_sentences=8000)
     exit()
 
     attns, hists = get_atten_hist_from_model('roberta-base', 10)
