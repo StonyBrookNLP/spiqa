@@ -116,7 +116,11 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
     if single_input:
         single_associated_data = [random.choice(associated_data)]
         fed_data = single_associated_data
-
+    
+    # MARK: define head mask here
+    head_mask = np.ones(ATT_SIZE[:2])
+    head_mask[0][9], head_mask[0][11], head_mask[1][2], head_mask[7][8] = 0, 0, 0, 0
+    
     res, pipeline_running_counter, fed_data_len = None, 0, len(fed_data)
     total_elem_count = 0
     print("Among all inputs {}/{} are selected.".format(fed_data_len, len(associated_data)))
@@ -124,7 +128,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
     for qa_pair in fed_data:
         print("running pipeline iter {}/{}...".format(pipeline_running_counter, fed_data_len))
         prediction = qa_pipeline(
-            {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=MAX_SEQ_LEN, att_threshold=att_threshold, hs_threshold=hs_threshold)
+            {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=MAX_SEQ_LEN, att_threshold=att_threshold, hs_threshold=hs_threshold, head_mask=head_mask)
         em_score = max(compute_exact(prediction['answer'], gold_ans)
                        for gold_ans in qa_pair['answers'])
         att_array = prediction['attentions']
@@ -430,7 +434,7 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
     computing histogram per token on-the-fly without saving the attentions in the memory
     '''
     # set histogram x axis starting point here
-    offset = 1e-45
+    offset = 1e-12
     hist_x_start, hist_x_end = log(offset, 10), log(1+offset, 10)
     if scale == 'linear':
         offset = 0.0
@@ -493,11 +497,16 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
         input_lens = [len(i['context']+i['question']) for i in associated_data]
         print("QA string pair length: [{}, {}]".format(min(input_lens), max(input_lens)))
         pipeline_running_counter, fed_data_len = 0, len(associated_data)
+
+        # MARK: define head mask here
+        head_mask = np.ones(ATT_SIZE[:2])
+        head_mask[0][9], head_mask[0][11], head_mask[1][2], head_mask[7][8] = 0, 0, 0, 0
+
         # run the prediction, calculate and store the hist
         for qa_pair in associated_data:
             print("running pipeline iter {}/{}...".format(pipeline_running_counter, fed_data_len))
             prediction = qa_pipeline(
-                {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=320, att_threshold=att_threshold)
+                {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=320, att_threshold=att_threshold, head_mask=head_mask)
             pipeline_running_counter += 1
             em_score = max(compute_exact(prediction['answer'], gold_ans)
                            for gold_ans in qa_pair['answers'])
