@@ -14,6 +14,7 @@ import argparse as ag
 import os
 import sys
 import random
+from datetime import datetime
 from textwrap import wrap
 from itertools import compress, product
 
@@ -21,9 +22,9 @@ PARAM_PATH = "./params/"
 DATA_PATH = "./data"
 
 def extract_inst_wikipedia(num_sentences: int):
-    dataset = load_dataset("wikipedia", "20200501.en", cache_dir=DATA_PATH)
+    dataset = load_dataset("wikipedia", "20200501.en", cache_dir=DATA_PATH, split='train[:10%]')
     random.seed(12331)
-    dataset = random.sample(dataset['train']['text'], num_sentences)
+    dataset = random.sample(dataset['text'], num_sentences)
     insts = []
     for doc in dataset:
         insts.append(doc.split('\n\n')[0])
@@ -78,7 +79,7 @@ def get_atten_hist_from_model(model_name: str, num_sentences: int):
             for i in range(len(attn_mask)): np.save(att_file, attentions[i], allow_pickle=False)
         with open(param_file_path + "_hists.npy", "wb+") as hists_file:
             np.save(hists_file, hists, allow_pickle=False)
-        
+
     print ("Shape of attention weight matrices", len(attentions), attentions[0].shape)
     return attentions, hists
 
@@ -93,6 +94,63 @@ def get_sparse_hist_token(attn, offset, sparsity_bar=0.0):
     sparse_hist = np.apply_along_axis(lambda a: np.histogram(a, bins=10, range=(0.0, 1.0))[0], -1, all_sparse_count)
     sparse_hist = np.apply_along_axis(lambda a: a / np.sum(a), -1, sparse_hist)
     return sparse_hist
+
+
+def get_sampled_tokens(model_name, num_tokens, head_idx=(0, 0)):
+    """
+    getting sampled tokens from varies instances
+    """
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModel.from_pretrained(model_name)
+    if torch.cuda.is_available(): model = model.to("cuda")
+    
+    # fetch data:
+    insts = extract_inst_wikipedia(20)
+    input_tokens = tokenizer.batch_encode_plus(insts, padding=True, return_tensors="pt")   
+    # run model
+    if torch.cuda.is_available(): 
+        for i in input_tokens.keys():
+            input_tokens[i] = input_tokens[i].to("cuda")
+        
+    with torch.no_grad():
+        model_output = model(**input_tokens, output_hidden_states=True, output_attentions=True)
+    attentions = convert_att_to_np(model_output[3], input_tokens['attention_mask'])
+    
+    
+    all_tokens, all_attention_hists = [], None
+    for i in input_tokens.keys():
+        input_tokens[i] = input_tokens[i].to("cpu")
+
+    for inst, attention in zip(input_tokens['input_ids'], attentions):
+        attention = attention[head_idx[0], head_idx[1], :, :]
+        all_tokens += [tokenizer.decode([i]).replace(' ', '') for i in inst[:attention.shape[-1]]]
+        offset = 1e-8
+        hist_x_start, hist_x_end = tv.log(offset, 10), tv.log(1, 10)
+        attention_hist = np.apply_along_axis(
+            lambda x: np.histogram(x, bins=tv.get_bin_edges(100, hist_x_start, hist_x_end, 'log'), range=(0.0, 1.0))[0], -1, attention)
+        all_attention_hists = attention_hist if all_attention_hists is None \
+                else np.concatenate((all_attention_hists, attention_hist), axis=0)
+    
+    sampled_tokens, sampled_attention_hists = [], None
+    sparse_token_counter = 0
+    for token, attention_hist in zip(all_tokens, all_attention_hists):
+        norm_cdf = np.cumsum(attention_hist).astype("float") / np.sum(attention_hist)
+        if norm_cdf[50] < 0.1:
+            print(token)
+            sampled_tokens.append(token)
+            attention_hist = attention_hist.reshape((1, attention_hist.shape[0]))
+            sampled_attention_hists = attention_hist if sampled_attention_hists is None \
+                                        else np.concatenate((sampled_attention_hists, attention_hist), axis=0)
+            sparse_token_counter += 1
+        # if sparse_token_counter > 6:
+        #     break
+    
+    random.seed(datetime.now())
+    sampled_token_ids = random.sample(range(len(all_tokens)), num_tokens - sparse_token_counter)
+    sampled_attention_hists = np.concatenate((sampled_attention_hists, all_attention_hists[sampled_token_ids, :]), axis=0)
+    sampled_attention_hists = np.apply_along_axis(lambda a: a / np.sum(a), -1, sampled_attention_hists)
+    return sampled_tokens, sampled_attention_hists, offset
+
 
 
 def attn_head_row_count(attn): return attn.shape[-1] * attn.shape[1]
@@ -199,7 +257,11 @@ def list_sparse_tokens_all(model_name, sparsity_bar=0.0, num_sentences=500):
 if __name__ == "__main__":
     # list_sparse_tokens_all("roberta-base", sparsity_bar=1e-8, num_sentences=8000)
 
-    attns, hists = get_atten_hist_from_model('roberta-base', 10)
+    sampled_tokens, sampled_attn_hists, offset = get_sampled_tokens("roberta-base", 100, head_idx=(1, 2))
+    tv.plot_atten_dist_per_token_with_names(sampled_attn_hists, sampled_tokens, offset, head_idx=(1, 2))
+    exit()
+
+    attns, hists = get_atten_hist_from_model('roberta-base', 150)
     attn_mask = [i.shape[-1] for i in attns]
     print(hists.shape, len(attn_mask))
 

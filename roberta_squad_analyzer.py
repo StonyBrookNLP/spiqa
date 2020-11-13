@@ -505,7 +505,7 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
             for att in prediction['attentions']:
                 att = att[:, :, :att.shape[-1], :]
                 print("min:", np.amin(att[att.nonzero()]))
-                curr_hist = np.apply_along_axis(lambda a: np.histogram(a+offset, atten_bins)[0], -1, att)
+                curr_hist = np.apply_along_axis(lambda a: np.histogram(a+offset, atten_bins, range=(0.0, 1.0))[0], -1, att)
                 atten_hist = [curr_hist] if atten_hist is None else atten_hist + [curr_hist]
                 curr_sparse_count = np.apply_along_axis(lambda a: float((a <= sparsity_bar).sum()) / att.shape[-1], -1, att)
                 all_sparse_count = curr_sparse_count if all_sparse_count is None \
@@ -615,8 +615,8 @@ def plot_sparsity_change(data, attached_title=''):
     ax2.set_yticks(np.linspace(20, 110, 10))
     ax2.set_ylim([20, 110])
 
-    ax2.set_xscale('log')
-    ax2.set_xlim([0.0001, 0.6])
+    ax2.set_xscale('linear')
+    ax2.set_xlim([0, 1.2])
     fig.suptitle(
         'Sparsity and Accuracy vs. Sparsity Dropping Threshold {}'.format(attached_title))
     fig.tight_layout()
