@@ -112,12 +112,11 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, spar
     atten_bar_width = [attn_bins[i] - attn_bins[i-1] for i in range(1, len(attn_bins))]
 
     # extract spread index
-    spread_idx = np.apply_along_axis(lambda x: np.argmax(x > 0.5), -1, np.cumsum(attn_hists, axis=-1))
+    spread_idx = np.apply_along_axis(lambda x: np.argmax(x >= 0.5), -1, np.cumsum(attn_hists, axis=-1))
     spread_idx = np.std(spread_idx, axis = -1)
     
-    with open("sparsity_spread/"+model_name.replace('/', '-')+".txt", "w+", newline='') as f:
-        spread_idx = pd.DataFrame(spread_idx, columns=['head_{}'.format(i) for i in range(spread_idx.shape[-1])])
-        f.write(spread_idx.to_string())
+    with open("sparsity_spread/"+model_name.replace('/', '-')+".npy", "wb+") as f:
+        np.save(f, spread_idx, allow_pickle=False)
 
     return
     
