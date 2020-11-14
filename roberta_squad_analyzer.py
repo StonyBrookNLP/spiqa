@@ -430,7 +430,7 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
     computing histogram per token on-the-fly without saving the attentions in the memory
     '''
     # set histogram x axis starting point here
-    offset = 1e-45
+    offset = 1e-10
     hist_x_start, hist_x_end = log(offset, 10), log(1+offset, 10)
     if scale == 'linear':
         offset = 0.0
@@ -504,7 +504,6 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
 
             for att in prediction['attentions']:
                 att = att[:, :, :att.shape[-1], :]
-                print("min:", np.amin(att[att.nonzero()]))
                 curr_hist = np.apply_along_axis(lambda a: np.histogram(a+offset, atten_bins)[0], -1, att)
                 atten_hist = [curr_hist] if atten_hist is None else atten_hist + [curr_hist]
                 curr_sparse_count = np.apply_along_axis(lambda a: float((a <= sparsity_bar).sum()) / att.shape[-1], -1, att)
@@ -540,7 +539,7 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
             np.save(hist_file, sparse_hist, allow_pickle=False)
 
     # plot atten_hist
-    tv.plot_atten_dist_per_token(atten_hist, bin_step, all_max, all_min, sparse_hist=sparse_hist)
+    tv.plot_atten_dist_per_token(atten_hist, bin_step, all_max, all_min, sparse_hist=sparse_hist, model_name=model_name)
 
     # plot sparsity histogram when sampling:
     # if samples > 0:

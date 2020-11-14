@@ -16,18 +16,32 @@ import sys
 import random
 from textwrap import wrap
 from itertools import compress, product
+import json
 
 PARAM_PATH = "./params/"
 DATA_PATH = "./data"
 
 def extract_inst_wikipedia(num_sentences: int):
-    dataset = load_dataset("wikipedia", "20200501.en", cache_dir=DATA_PATH)
+    dataset = load_dataset("wikipedia", "20200501.en", cache_dir=DATA_PATH, split='train[:5%]')
     random.seed(12331)
-    dataset = random.sample(dataset['train']['text'], num_sentences)
+    dataset = random.sample(dataset['text'], num_sentences)
     insts = []
     for doc in dataset:
         insts.append(doc.split('\n\n')[0])
     return insts 
+
+def extract_inst_squad(num_paras: int):
+    data, squad_ver = [], 'v1.1'
+    with open(DATA_PATH + '/dev-v1.1.json', "r", encoding="utf-8") as data_file:
+        squad_raw_data = json.load(data_file)["data"]
+
+        for topic in squad_raw_data:
+            for pgraph in topic["paragraphs"]:
+                data.append(pgraph["context"])
+
+    random.seed(123)
+    data = random.sample(data, num_paras)
+    return data
 
 # helper func: convert attention to numpy array in 
 # list of [inst, [layers, heads, rows, cols]]
@@ -58,7 +72,8 @@ def get_atten_hist_from_model(model_name: str, num_sentences: int):
         if torch.cuda.is_available(): model = model.to("cuda")
         
         # fetch data:
-        insts = extract_inst_wikipedia(num_sentences)
+        # insts = extract_inst_wikipedia(num_sentences)
+        insts = extract_inst_squad(num_sentences)
         input_tokens = tokenizer.batch_encode_plus(insts, padding=True, return_tensors="pt")
 
         # run model
@@ -197,9 +212,10 @@ def list_sparse_tokens_all(model_name, sparsity_bar=0.0, num_sentences=500):
 
 
 if __name__ == "__main__":
+    model_name = 'roberta-base'
     # list_sparse_tokens_all("roberta-base", sparsity_bar=1e-8, num_sentences=8000)
 
-    attns, hists = get_atten_hist_from_model('roberta-base', 10)
+    attns, hists = get_atten_hist_from_model(model_name, 100)
     attn_mask = [i.shape[-1] for i in attns]
     print(hists.shape, len(attn_mask))
 
@@ -207,5 +223,5 @@ if __name__ == "__main__":
     for i in range(10):
         print("h_state mean:{:.4f}, std:{:.4f}".format(
             np.mean(hists[0][0][i*5], axis=-1), np.std(hists[0][0][i*5], axis=-1)))
-    tv.plot_atten_dist_per_token(attns, 100, sparse_hist=get_sparse_hist_token(attns, 0.0))
+    tv.plot_atten_dist_per_token(attns, 100, sparse_hist=get_sparse_hist_token(attns, 0.0), model_name=model_name)
     tv.plot_hs_dist_per_token(hists, 100, attn_mask, scale='linear')

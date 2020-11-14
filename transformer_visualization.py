@@ -2,6 +2,7 @@
 Plotting function for transformer hstate and attention visualization
 '''
 import numpy as np
+import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
@@ -72,7 +73,7 @@ def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True, laye
         plt.close(fig)
 
 
-def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, sparse_hist=None, scale='log', attached_title='', ylim=(0.2, 1)):
+def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, sparse_hist=None, scale='log', attached_title='', model_name='', ylim=(0.2, 1)):
     """
     plotting the attention histogram per token, stacking all plots together.
     accepted data: a list of attention matrices, with each as [layer, head, length, length]
@@ -81,7 +82,7 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, spar
     They both are in [layer, head]
     attn_max and attn_min are not required when data is a list of matrice
     """
-    offset = 1e-45
+    offset = 1e-10
     hist_x_start, hist_x_end = log(offset, 10), log(1, 10)
     if scale == 'linear':
         offset = 0.0
@@ -91,7 +92,7 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, spar
     if type(data) is list:
         for inst in data:
             inst_attn_hist = np.apply_along_axis(
-                lambda x: np.histogram(x + offset, attn_bins)[0], -1,  inst)
+                lambda x: np.histogram(x + offset, attn_bins, range=(0.0, 1.0))[0], -1,  inst)
             inst_attn_max, inst_attn_min = \
                 np.amax(inst, axis=(-2, -1)), np.amin(inst, axis=(-2, -1))
 
@@ -110,6 +111,16 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, spar
     print(attn_hists.shape)
     atten_bar_width = [attn_bins[i] - attn_bins[i-1] for i in range(1, len(attn_bins))]
 
+    # extract spread index
+    spread_idx = np.apply_along_axis(lambda x: np.argmax(x > 0.5), -1, np.cumsum(attn_hists, axis=-1))
+    spread_idx = np.std(spread_idx, axis = -1)
+    
+    with open("sparsity_spread/"+model_name.replace('/', '-')+".txt", "w+", newline='') as f:
+        spread_idx = pd.DataFrame(spread_idx, columns=['head_{}'.format(i) for i in range(spread_idx.shape[-1])])
+        f.write(spread_idx.to_string())
+
+    return
+    
     for layer_idx, layer in enumerate(attn_hists):
         print("plotting layer {}...".format(layer_idx))
         for head_idx, head in enumerate(layer):
