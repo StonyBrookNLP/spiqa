@@ -237,3 +237,27 @@ def plot_hs_dist_per_token(data, bin_step, attn_mask, scale='log', attached_titl
     plt.savefig(RES_FIG_PATH+'hs_hist_per_token.png', dpi=600)
     plt.clf()
     plt.close(fig)
+
+def plot_dist_diversity(data: dict, attached_title=''):
+    """
+    """
+    fig, ax = plt.subplots(3, 4, figsize=(22, 15))
+    matplotlib.rcParams.update({'font.size': 12})
+    matplotlib.rcParams.update({'xtick.labelsize': 13})
+    matplotlib.rcParams.update({'ytick.labelsize': 13})
+    for head_idx in range(12):
+        curr_ax = ax[int(head_idx / 4), int(head_idx % 4)]
+        for model_idx, model in enumerate(data.keys()):
+            spread_idx = data[model][:, head_idx].flatten()
+            curr_ax.plot(range(12), spread_idx, color='C{}'.format(model_idx), marker='s')
+
+        curr_ax.set_title('head_{}'.format(head_idx))
+        curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
+    
+    fig.suptitle("Variance of density function per head{}".format(attached_title), fontsize=21, y=0.99)
+    patches = [mpatches.Patch(color='C{}'.format(i), label=model) for i, model in enumerate(data.keys())]
+    fig.legend(handles=patches, loc='upper center', ncol=len(data.keys()), bbox_to_anchor=(0.5, 0.97))
+    fig.tight_layout(pad=2.2)
+    plt.savefig(RES_FIG_PATH+'dist_spread.png', dpi=600)
+    plt.clf()
+    plt.close(fig)
