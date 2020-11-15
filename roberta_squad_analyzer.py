@@ -70,6 +70,10 @@ def parse_squad_json(squad_ver='v1.1'):
 
     return data
 
+# def run_bert_wiki_pipeline():
+#     wiki_pipeline = pipeline(
+#         ""
+#     )
 
 def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, sample_inputs=-1, att_threshold=0.0, hs_threshold=0.0):
     '''
@@ -362,17 +366,17 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
 
     if single_head_idx is None:
         # walk through layers and heads
-        data = np.concatenate(data, axis=-1)
-        data = data.reshape(*data.shape[:2], -1)
-        print(data.shape)
+        # data = np.concatenate(data, axis=-1)
+        # data = data.reshape(*data.shape[:2], -1)
+        # print(data.shape)
         
         for layer_idx, layer in enumerate(data):
             print('plotting histogram for layer {}...'.format(layer_idx))
             atten_layers = {}
             for head_idx, head in enumerate(layer):
-                sparsity = (head <= (sparsity_bar)).sum() / head.flatten().shape[0]
+                sparsity = (head <= (sparsity_bar)).sum() // head.flatten().shape[0]
                 atten_layers['head_{}, max: {:.4f}, min: {:.4f}, spars: {:.4f}, sparsity_bar: {:.4f}'.format(
-                    head_idx, np.amax(head), np.amin(head), sparsity, sparsity_bar)] = (head.flatten()+offset).tolist()
+                    head_idx, torch.max(head), torch.min(head), sparsity, sparsity_bar)] = (head.flatten()+offset).tolist()
 
             atten_layers_pd = pd.DataFrame(atten_layers)
             # create vars for plotting
