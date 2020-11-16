@@ -3,7 +3,7 @@ roberta base analyzer: analyzer sparsity of the roberta base
 """
 
 from transformers import pipeline
-from transformers import AutoConfig, AutoTokenizer, AutoModel
+from transformers import BertForMaskedLM, BertTokenizer
 from datasets import load_dataset
 import torch
 import numpy as np
@@ -21,9 +21,9 @@ PARAM_PATH = "./params/"
 DATA_PATH = "./data"
 
 def extract_inst_wikipedia(num_sentences: int):
-    dataset = load_dataset("wikipedia", "20200501.en", cache_dir=DATA_PATH)
+    dataset = load_dataset("wikipedia", "20200501.en", cache_dir=DATA_PATH, split='train[:10%]')
     random.seed(12331)
-    dataset = random.sample(dataset['train']['text'], num_sentences)
+    dataset = random.sample(dataset['text'], num_sentences)
     insts = []
     for doc in dataset:
         insts.append(doc.split('\n\n')[0])
@@ -40,6 +40,33 @@ def convert_att_to_np(x, attn_mask):
 
 def convert_hist_to_np(x): return np.asarray([layer.cpu().numpy() for layer in x])
 
+def run_mask_fill_pipeline(model_name: str, num_sentences):
+    mf_pipeline = pipeline("fill-mask", model=model_name, tokenizer=model_name, device=0, \
+        topk=20, att_threshold=0.0001, output_attentions=True, output_hidden_states=True)
+
+    # fetch data:
+    insts, masked_insts, correct_token = extract_inst_wikipedia(num_sentences), [], []
+    for inst in insts:
+        word_list = inst.split(' ')
+        rand_token_to_mask = random.randint(0, len(word_list)-1)
+        correct_token.append(word_list[rand_token_to_mask])
+        word_list[rand_token_to_mask] = '[MASK]'
+        masked_insts.append(" ".join(word_list))
+
+    results = mf_pipeline(masked_insts)
+    
+    correct = 0
+    for res_idx, res in enumerate(results['result']):
+        for possible_res in res:
+            if possible_res['token_str'].lower() == correct_token[res_idx].lower():
+                correct += 1
+                break
+
+    print("em: ", float(correct)/num_sentences)
+
+    return float(correct)/num_sentences, results['hidden_states'], results['attentions']
+    
+
 def get_atten_hist_from_model(model_name: str, num_sentences: int):
     param_file_path = PARAM_PATH + model_name
 
@@ -53,21 +80,28 @@ def get_atten_hist_from_model(model_name: str, num_sentences: int):
         with open(param_file_path + "_hists.npy", "rb") as hists_file:
             hists = np.load(hists_file)
     else:
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModel.from_pretrained(model_name)
+        tokenizer = BertTokenizer.from_pretrained(model_name)
+        model = BertForMaskedLM.from_pretrained(model_name)
         if torch.cuda.is_available(): model = model.to("cuda")
         
         # fetch data:
-        insts = extract_inst_wikipedia(num_sentences)
-        input_tokens = tokenizer.batch_encode_plus(insts, padding=True, return_tensors="pt")
+        insts, masked_insts = extract_inst_wikipedia(num_sentences), []
+        for inst in insts:
+            word_list = inst.split(' ')
+            word_list[random.randint(0, len(word_list)-1)] = '[MASK]'
+            masked_insts.append(" ".join(word_list))
+
+        input_tokens = tokenizer(masked_insts, padding=True, return_tensors="pt")
+        labels = tokenizer(insts, padding=True, return_tensors="pt")['input_ids']
 
         # run model
         if torch.cuda.is_available(): 
             for i in input_tokens.keys():
                 input_tokens[i] = input_tokens[i].to("cuda")
+            labels = labels.to("cuda")
               
         with torch.no_grad():
-            model_output = model(**input_tokens, output_hidden_states=True, output_attentions=True)
+            model_output = model(**input_tokens, output_hidden_states=True, output_attentions=True, labels=labels)
         attentions = convert_att_to_np(model_output[3], input_tokens['attention_mask'])
         attn_mask = input_tokens['attention_mask'].cpu().numpy()
         hists = convert_hist_to_np(model_output[2])
@@ -199,7 +233,10 @@ def list_sparse_tokens_all(model_name, sparsity_bar=0.0, num_sentences=500):
 if __name__ == "__main__":
     # list_sparse_tokens_all("roberta-base", sparsity_bar=1e-8, num_sentences=8000)
 
-    attns, hists = get_atten_hist_from_model('roberta-base', 10)
+    run_mask_fill_pipeline('bert-base-uncased', 5)
+    exit()
+
+    attns, hists = get_atten_hist_from_model('bert-base-uncased', 3)
     attn_mask = [i.shape[-1] for i in attns]
     print(hists.shape, len(attn_mask))
 
@@ -207,5 +244,5 @@ if __name__ == "__main__":
     for i in range(10):
         print("h_state mean:{:.4f}, std:{:.4f}".format(
             np.mean(hists[0][0][i*5], axis=-1), np.std(hists[0][0][i*5], axis=-1)))
-    tv.plot_atten_dist_per_token(attns, 100, sparse_hist=get_sparse_hist_token(attns, 0.0))
-    tv.plot_hs_dist_per_token(hists, 100, attn_mask, scale='linear')
+    # tv.plot_atten_dist_per_token(attns, 100, sparse_hist=get_sparse_hist_token(attns, 0.0))
+    # tv.plot_hs_dist_per_token(hists, 100, attn_mask, scale='linear')
