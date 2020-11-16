@@ -21,14 +21,19 @@ from itertools import compress, product
 PARAM_PATH = "./params/"
 DATA_PATH = "./data"
 
-def extract_inst_wikipedia(num_sentences: int):
+def extract_inst_wikipedia(model_name, num_sentences: int):
     dataset = load_dataset("wikipedia", "20200501.en", cache_dir=DATA_PATH, split='train[:10%]')
     random.seed(12331)
     dataset = random.sample(dataset['text'], num_sentences)
     insts = []
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     for doc in dataset:
         para = doc.split('\n\n')[0]
-        if(len(para.split(' ')) < 512): insts.append(para)
+        tokenized_para_len = len(tokenizer(para)['input_ids'])       
+        if(tokenized_para_len < 512): insts.append(para)
+   
+    print("extracted {} paragrahps from wikipedia".format(len(insts)))
     return insts 
 
 # helper func: convert attention to numpy array in 
@@ -60,10 +65,10 @@ def get_atten_hist_from_model(model_name: str, num_sentences: int, att_threshold
     else:
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForMaskedLM.from_pretrained(model_name)
-        if torch.cuda.is_available(): model = model.to("cuda")
+        if torch.cuda.is_available(): model = model.to("cuda:4")
         
         # fetch data:
-        insts = extract_inst_wikipedia(num_sentences)
+        insts = extract_inst_wikipedia(model_name, num_sentences)
         input_tokens = tokenizer(insts, padding=True, return_tensors="pt")
         labels = input_tokens['input_ids'].clone()
         random.seed(12331)
@@ -73,8 +78,8 @@ def get_atten_hist_from_model(model_name: str, num_sentences: int, att_threshold
         # run model
         if torch.cuda.is_available(): 
             for i in input_tokens.keys():
-                input_tokens[i] = input_tokens[i].to("cuda")
-            labels = labels.to("cuda")
+                input_tokens[i] = input_tokens[i].to("cuda:4")
+            labels = labels.to("cuda:4")
               
         with torch.no_grad():
             model_output = model(**input_tokens, output_hidden_states=True, output_attentions=True, labels=labels, \
@@ -85,13 +90,13 @@ def get_atten_hist_from_model(model_name: str, num_sentences: int, att_threshold
         attn_mask = input_tokens['attention_mask'].cpu().numpy()
         hists = convert_hist_to_np(model_output[2])
 
-        with open(param_file_path + "_attention_mask.npy", "wb+") as att_mask_file:
-            np.save(att_mask_file, attn_mask)
-            np.save(att_mask_file, np.array([loss]))
-        with open(param_file_path + "_attention.npy", "wb+") as att_file:
-            for i in range(len(attn_mask)): np.save(att_file, attentions[i], allow_pickle=False)
-        with open(param_file_path + "_hists.npy", "wb+") as hists_file:
-            np.save(hists_file, hists, allow_pickle=False)
+# with open(param_file_path + "_attention_mask.npy", "wb+") as att_mask_file:
+#           np.save(att_mask_file, attn_mask)
+#           np.save(att_mask_file, np.array([loss]))
+#       with open(param_file_path + "_attention.npy", "wb+") as att_file:
+#           for i in range(len(attn_mask)): np.save(att_file, attentions[i], allow_pickle=False)
+#       with open(param_file_path + "_hists.npy", "wb+") as hists_file:
+#           np.save(hists_file, hists, allow_pickle=False)
         
     print ("Shape of attention weight matrices", len(attentions), attentions[0].shape)
     return math.exp(loss), attentions, hists
@@ -296,7 +301,7 @@ if __name__ == "__main__":
     # list_sparse_tokens_all("roberta-base", sparsity_bar=1e-8, num_sentences=8000)
     
     if args['evaluation']:
-        get_em_sparsity_from_masked_lm('roberta-base', samples, att_threshold=att_threshold, hs_threshold=hs_threshold)
+        get_em_sparsity_from_masked_lm('bert-base-uncased', samples, att_threshold=att_threshold, hs_threshold=hs_threshold)
 
     if args['distribution']:
         attns, hists = get_atten_hist_from_model('bert-base-uncased', samples, att_threshold=att_threshold, hs_threshold=hs_threshold)
