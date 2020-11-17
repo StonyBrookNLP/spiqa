@@ -129,7 +129,7 @@ def get_em_sparsity_from_masked_lm(model_name: str, num_sentences: int, att_thre
     # extract parameters from model
     else:
         res, total_elem_count = None, 0
-        batch_size = 100
+        batch_size = 20
         # fetch data
         all_insts = list(chunks(extract_inst_wikipedia(model_name, num_sentences), batch_size))
         random.seed(12331)
@@ -157,7 +157,8 @@ def get_em_sparsity_from_masked_lm(model_name: str, num_sentences: int, att_thre
             total_elem_count += sum([att.shape[-1] * att.shape[-1] for att in attentions])
 
         res['sparsity'] = res['sparsity'].astype(float) / total_elem_count
-        res['score'] /= math.exp(len(all_insts))
+        res['score'] /= float(num_sentences)
+        res['score'] = math.exp(res['score'])
 
         # save params
         total_score, inst_count, all_max, all_min, all_mean, all_std, all_sparsity = \
@@ -313,7 +314,7 @@ if __name__ == "__main__":
     # list_sparse_tokens_all("roberta-base", sparsity_bar=1e-8, num_sentences=8000)
     
     if args['evaluation']:
-        get_em_sparsity_from_masked_lm('roberta-base', samples, att_threshold=att_threshold, hs_threshold=hs_threshold)
+        get_em_sparsity_from_masked_lm('bert-base-uncased', samples, att_threshold=att_threshold, hs_threshold=hs_threshold)
 
     if args['distribution']:
         attns, hists = get_atten_hist_from_model('bert-base-uncased', samples, att_threshold=att_threshold, hs_threshold=hs_threshold)
