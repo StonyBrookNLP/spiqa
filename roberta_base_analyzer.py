@@ -15,6 +15,7 @@ import os
 import sys
 import random
 import math
+import glob
 from textwrap import wrap
 from itertools import compress, product
 
@@ -23,7 +24,6 @@ DATA_PATH = "./data"
 
 def extract_inst_wikipedia(model_name, num_sentences: int):
     dataset = load_dataset("wikipedia", "20200501.en", cache_dir=DATA_PATH, split='train[:10%]')
-    random.seed(12331)
     dataset = random.sample(dataset['text'], num_sentences)
     insts = []
 
@@ -31,10 +31,56 @@ def extract_inst_wikipedia(model_name, num_sentences: int):
     for doc in dataset:
         para = doc.split('\n\n')[0]
         tokenized_para_len = len(tokenizer(para)['input_ids'])       
-        if(tokenized_para_len < 512): insts.append(para)
+        if(100 < tokenized_para_len < 512): insts.append(para)
    
     print("extracted {} paragrahps from wikipedia".format(len(insts)))
     return insts 
+
+def prepare_masked_tokens(model_name, num_sentences, device):
+    
+    input_tokens, labels = [], []
+    tokens_path_list = [i.replace('\\', '/') for i in glob.glob(DATA_PATH + '/mlm_tokens_*.npz')]
+    labels_path_list = [i.replace('\\', '/') for i in glob.glob(DATA_PATH + '/mlm_labels_*.npy')]
+
+    if (len(tokens_path_list) > 0) and (len(labels_path_list) > 0):
+        for token_f, label_f in zip(tokens_path_list, labels_path_list):
+            token_f_res, temp_token = np.load(token_f), {}
+            for key in token_f_res.files:
+                temp_token[key] = token_f_res[key]
+            input_tokens.append(temp_token)
+            labels.append(np.load(label_f))
+
+    else:
+        sentences = extract_inst_wikipedia(model_name, num_sentences)
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+        for inst_str in sentences:
+            input_token = tokenizer([inst_str], padding=True, return_tensors='np')
+            ids = input_token['input_ids']
+            random_idx = np.random.choice(np.arange(start=1, stop=(ids.shape[-1]-1)), int(ids.shape[-1]*0.15), replace=False)
+            masked_ids = np.stack([ids[0]]* len(random_idx))
+            label = np.ones(masked_ids.shape) * -100
+            for idx in range(masked_ids.shape[0]): 
+                label[idx][random_idx[idx]] = masked_ids[idx][random_idx[idx]]
+                masked_ids[idx][random_idx[idx]] = tokenizer.mask_token_id
+            input_token['input_ids'] = masked_ids
+            input_token['attention_mask'] = np.stack([input_token['attention_mask'][0]] * len(random_idx))
+            if input_token.get('token_type_ids', 0) != 0:
+                input_token['token_type_ids'] = np.stack([input_token['token_type_ids'][0]] * len(random_idx))
+            input_tokens.append(input_token)
+            labels.append(label)
+
+        for idx, i in enumerate(input_tokens):
+            np.savez(DATA_PATH + '/mlm_tokens_{}.npz'.format(idx), **i)
+        for idx, i in enumerate(labels):
+            np.save(DATA_PATH + '/mlm_labels_{}.npy'.format(idx), i)
+
+    for idx in range(len(input_tokens)):
+        for k in input_tokens[idx].keys():
+            input_tokens[idx][k] = torch.Tensor(input_tokens[idx][k]).to(device).long()
+        labels[idx] = torch.Tensor(labels[idx]).to(device).long()
+
+    return input_tokens, labels
 
 # helper func: convert attention to numpy array in 
 # list of [inst, [layers, heads, rows, cols]]
@@ -48,7 +94,7 @@ def convert_att_to_np(x, attn_mask):
 def convert_hist_to_np(x): return np.asarray([layer.cpu().numpy() for layer in x])
     
 
-def get_atten_hist_from_model(model_name: str, insts, att_threshold=0.0, hs_threshold=0.0, stored_attentions=False):
+def get_atten_hist_from_model(model_name: str, input_tokens, labels=None, att_threshold=0.0, hs_threshold=0.0, stored_attentions=False, device='cuda'):
     param_file_path = PARAM_PATH + model_name
     head_mask = None
 
@@ -63,33 +109,19 @@ def get_atten_hist_from_model(model_name: str, insts, att_threshold=0.0, hs_thre
         with open(param_file_path + "_hists.npy", "rb") as hists_file:
             hists = np.load(hists_file)
     else:
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForMaskedLM.from_pretrained(model_name)
-        if torch.cuda.is_available(): model = model.to("cuda")
-
-        input_tokens = tokenizer(insts, padding=True, return_tensors="pt")
-        labels = torch.Tensor(np.ones(input_tokens['input_ids'].shape) * -100).type(torch.long)
-        masked_token_idx = [random.randint(1, len(i)-2) for i in input_tokens['input_ids']]
-
-        for inst_id, masked_idx in enumerate(masked_token_idx):
-            labels[inst_id][masked_idx] = input_tokens['input_ids'][inst_id][masked_idx]
-            input_tokens['input_ids'][inst_id][masked_idx] = tokenizer.mask_token_id
+        if torch.cuda.is_available(): model = model.to(device)
 
         # run model
-        if torch.cuda.is_available(): 
-            for i in input_tokens.keys():
-                input_tokens[i] = input_tokens[i].to("cuda")
-                labels = labels.to("cuda")
-              
         with torch.no_grad():
             model_output = model(**input_tokens, output_hidden_states=True, output_attentions=True, labels=labels, \
                                     att_threshold=att_threshold, hs_threshold=hs_threshold, head_mask=head_mask)
         
         
         attentions = convert_att_to_np(model_output[3], input_tokens['attention_mask'])
-        attn_mask = input_tokens['attention_mask'].cpu().numpy()
+        
         hists = convert_hist_to_np(model_output[2])
-        loss = (model_output[0]).item()
+        loss = (model_output[0]).item() * labels.size()[0]
 
         if stored_attentions:
             with open(param_file_path + "_attention_mask.npy", "wb+") as att_mask_file:
@@ -103,7 +135,7 @@ def get_atten_hist_from_model(model_name: str, insts, att_threshold=0.0, hs_thre
     print ("Shape of attention weight matrices", len(attentions), attentions[0].shape)
     return loss, attentions, hists
 
-def get_em_sparsity_from_masked_lm(model_name: str, num_sentences: int, att_threshold=0.0, hs_threshold=0.0):
+def get_em_sparsity_from_masked_lm(model_name: str, num_sentences: int, att_threshold=0.0, hs_threshold=0.0, device='cuda'):
     def chunks(lst, n):
         """Yield successive n-sized chunks from lst."""
         for i in range(0, len(lst), n):
@@ -129,14 +161,14 @@ def get_em_sparsity_from_masked_lm(model_name: str, num_sentences: int, att_thre
     # extract parameters from model
     else:
         res, total_elem_count = None, 0
-        batch_size = 20
+        inst_count = 0
         # fetch data
-        all_insts = list(chunks(extract_inst_wikipedia(model_name, num_sentences), batch_size))
-        random.seed(6)
+        all_input_tokens, all_labels = prepare_masked_tokens(model_name, num_sentences, device=device)
 
-        for batch_inst in all_insts:
+        for batch_inputs, batch_labels in zip(all_input_tokens, all_labels):
+            inst_count += len(batch_labels)
             ppl, attentions, hidden_states = \
-                get_atten_hist_from_model(model_name, batch_inst, att_threshold=att_threshold, hs_threshold=hs_threshold)
+                get_atten_hist_from_model(model_name, batch_inputs, batch_labels, att_threshold=att_threshold, hs_threshold=hs_threshold, device=device)
                 
             def get_spars(x, axis): 
                 return x.shape[-1] ** 2 - np.count_nonzero(x[:, :, :, :], axis=axis)
@@ -157,12 +189,12 @@ def get_em_sparsity_from_masked_lm(model_name: str, num_sentences: int, att_thre
             total_elem_count += sum([att.shape[-1] * att.shape[-1] for att in attentions])
 
         res['sparsity'] = res['sparsity'].astype(float) / total_elem_count
-        res['score'] /= float(len(all_insts))
+        res['score'] /= float(inst_count)
         res['score'] = math.exp(res['score'])
 
         # save params
-        total_score, inst_count, all_max, all_min, all_mean, all_std, all_sparsity = \
-            res['score'], num_sentences, res['max'], res['min'], res['mean'], res['std'], res['sparsity']
+        total_score, all_max, all_min, all_mean, all_std, all_sparsity = \
+            res['score'], res['max'], res['min'], res['mean'], res['std'], res['sparsity']
 
         with open(score_path, "wb+") as scores_file:
             np.save(scores_file, np.array([total_score, inst_count]))
@@ -173,7 +205,7 @@ def get_em_sparsity_from_masked_lm(model_name: str, num_sentences: int, att_thre
             np.save(att_stat_file, all_std)
             np.save(att_stat_file, all_sparsity)
     
-    print("total score: ", total_score, "#sentences: ", inst_count,
+    print("total score: ", total_score, "#instances: ", inst_count,
           "max dim:", all_max.shape, "min dim:", all_min.shape,
           "mean dim:", all_mean.shape, "std dim:", all_std.shape,
           "sparsity dim:", all_sparsity.shape)
@@ -314,7 +346,7 @@ if __name__ == "__main__":
     # list_sparse_tokens_all("roberta-base", sparsity_bar=1e-8, num_sentences=8000)
     
     if args['evaluation']:
-        get_em_sparsity_from_masked_lm('bert-base-uncased', samples, att_threshold=att_threshold, hs_threshold=hs_threshold)
+        get_em_sparsity_from_masked_lm('roberta-base', samples, att_threshold=att_threshold, hs_threshold=hs_threshold)
 
     if args['distribution']:
         attns, hists = get_atten_hist_from_model('bert-base-uncased', samples, att_threshold=att_threshold, hs_threshold=hs_threshold)
