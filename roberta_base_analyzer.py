@@ -48,12 +48,12 @@ def convert_att_to_np(x, attn_mask):
 def convert_hist_to_np(x): return np.asarray([layer.cpu().numpy() for layer in x])
     
 
-def get_atten_hist_from_model(model_name: str, num_sentences: int, att_threshold=0.0, hs_threshold=0.0):
+def get_atten_hist_from_model(model_name: str, insts, att_threshold=0.0, hs_threshold=0.0, stored_attentions=False):
     param_file_path = PARAM_PATH + model_name
     head_mask = None
 
     attentions, attn_mask, hists, loss = None, None, None, 0.0
-    if os.path.isfile(param_file_path + "_attention.npy"):
+    if os.path.isfile(param_file_path + "_attention.npy") and stored_attentions:
         print("loading parameters from file...")
         with open(param_file_path + "_attention_mask.npy", "rb") as att_mask_file:
             attn_mask = np.load(att_mask_file, allow_pickle=True)
@@ -65,44 +65,50 @@ def get_atten_hist_from_model(model_name: str, num_sentences: int, att_threshold
     else:
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForMaskedLM.from_pretrained(model_name)
-        if torch.cuda.is_available(): model = model.to("cuda:4")
-        
-        # fetch data:
-        insts = extract_inst_wikipedia(model_name, num_sentences)
+        if torch.cuda.is_available(): model = model.to("cuda")
+
         input_tokens = tokenizer(insts, padding=True, return_tensors="pt")
-        labels = input_tokens['input_ids'].clone()
-        random.seed(12331)
-        for i in labels:
-            i[random.randint(0, len(i)-1)] = tokenizer.mask_token_id
+        labels = torch.Tensor(np.ones(input_tokens['input_ids'].shape) * -100).type(torch.long)
+        masked_token_idx = [random.randint(1, len(i)-2) for i in input_tokens['input_ids']]
+
+        for inst_id, masked_idx in enumerate(masked_token_idx):
+            labels[inst_id][masked_idx] = input_tokens['input_ids'][inst_id][masked_idx]
+            input_tokens['input_ids'][inst_id][masked_idx] = tokenizer.mask_token_id
 
         # run model
         if torch.cuda.is_available(): 
             for i in input_tokens.keys():
-                input_tokens[i] = input_tokens[i].to("cuda:4")
-            labels = labels.to("cuda:4")
+                input_tokens[i] = input_tokens[i].to("cuda")
+                labels = labels.to("cuda")
               
         with torch.no_grad():
             model_output = model(**input_tokens, output_hidden_states=True, output_attentions=True, labels=labels, \
                                     att_threshold=att_threshold, hs_threshold=hs_threshold, head_mask=head_mask)
         
-        loss = model_output[0]
+        
         attentions = convert_att_to_np(model_output[3], input_tokens['attention_mask'])
         attn_mask = input_tokens['attention_mask'].cpu().numpy()
         hists = convert_hist_to_np(model_output[2])
+        loss = (model_output[0]).item() * len(attentions)
 
-# with open(param_file_path + "_attention_mask.npy", "wb+") as att_mask_file:
-#           np.save(att_mask_file, attn_mask)
-#           np.save(att_mask_file, np.array([loss]))
-#       with open(param_file_path + "_attention.npy", "wb+") as att_file:
-#           for i in range(len(attn_mask)): np.save(att_file, attentions[i], allow_pickle=False)
-#       with open(param_file_path + "_hists.npy", "wb+") as hists_file:
-#           np.save(hists_file, hists, allow_pickle=False)
+        if stored_attentions:
+            with open(param_file_path + "_attention_mask.npy", "wb+") as att_mask_file:
+                np.save(att_mask_file, attn_mask)
+                np.save(att_mask_file, np.array([loss]))
+            with open(param_file_path + "_attention.npy", "wb+") as att_file:
+                for i in range(len(attn_mask)): np.save(att_file, attentions[i], allow_pickle=False)
+            with open(param_file_path + "_hists.npy", "wb+") as hists_file:
+                np.save(hists_file, hists, allow_pickle=False)
         
     print ("Shape of attention weight matrices", len(attentions), attentions[0].shape)
-    return math.exp(loss), attentions, hists
+    return loss, attentions, hists
 
 def get_em_sparsity_from_masked_lm(model_name: str, num_sentences: int, att_threshold=0.0, hs_threshold=0.0):
-    
+    def chunks(lst, n):
+        """Yield successive n-sized chunks from lst."""
+        for i in range(0, len(lst), n):
+            yield lst[i:i + n]
+
     total_score, inst_count, all_max, all_min, all_mean, all_std, all_sparsity = \
         None, None, None, None, None, None, None
     
@@ -123,29 +129,35 @@ def get_em_sparsity_from_masked_lm(model_name: str, num_sentences: int, att_thre
     # extract parameters from model
     else:
         res, total_elem_count = None, 0
+        batch_size = 100
+        # fetch data
+        all_insts = list(chunks(extract_inst_wikipedia(model_name, num_sentences), batch_size))
+        random.seed(12331)
 
-        ppl, attentions, hidden_states = \
-            get_atten_hist_from_model(model_name, num_sentences, att_threshold=att_threshold, hs_threshold=hs_threshold)
-            
-        def get_spars(x, axis): 
-            return x.shape[-1] ** 2 - np.count_nonzero(x[:, :, :, :], axis=axis)
-        def agg_func(f): return np.stack([f(i, axis=(-2, -1)) for i in attentions], axis=0)
-        def add_func(f): return np.sum([f(i, axis=(-2, -1)) for i in attentions], axis=0)
-        if res is None:
-            res = {'mean': agg_func(np.mean),
-                'max': agg_func(np.amax), 'min': agg_func(np.amin), 
-                'std': agg_func(np.std), 'sparsity': add_func(get_spars)}
-        else:
-            res['max'] = np.concatenate((res['max'], agg_func(np.amax)), axis=0)
-            res['min'] = np.concatenate((res['min'], agg_func(np.amin)), axis=0)
-            res['mean'] = np.concatenate((res['mean'], agg_func(np.mean)), axis=0)
-            res['std'] = np.concatenate((res['std'], agg_func(np.std)), axis=0)
-            res['sparsity'] = np.add(res['sparsity'], add_func(get_spars))
+        for batch_inst in all_insts:
+            ppl, attentions, hidden_states = \
+                get_atten_hist_from_model(model_name, batch_inst, att_threshold=att_threshold, hs_threshold=hs_threshold)
+                
+            def get_spars(x, axis): 
+                return x.shape[-1] ** 2 - np.count_nonzero(x[:, :, :, :], axis=axis)
+            def agg_func(f): return np.stack([f(i, axis=(-2, -1)) for i in attentions], axis=0)
+            def add_func(f): return np.sum([f(i, axis=(-2, -1)) for i in attentions], axis=0)
+            if res is None:
+                res = {'score': ppl, 'mean': agg_func(np.mean),
+                    'max': agg_func(np.amax), 'min': agg_func(np.amin), 
+                    'std': agg_func(np.std), 'sparsity': add_func(get_spars)}
+            else:
+                res['score'] += ppl
+                res['max'] = np.concatenate((res['max'], agg_func(np.amax)), axis=0)
+                res['min'] = np.concatenate((res['min'], agg_func(np.amin)), axis=0)
+                res['mean'] = np.concatenate((res['mean'], agg_func(np.mean)), axis=0)
+                res['std'] = np.concatenate((res['std'], agg_func(np.std)), axis=0)
+                res['sparsity'] = np.add(res['sparsity'], add_func(get_spars))
 
-        total_elem_count += sum([att.shape[-1] * att.shape[-1] for att in attentions])
+            total_elem_count += sum([att.shape[-1] * att.shape[-1] for att in attentions])
 
         res['sparsity'] = res['sparsity'].astype(float) / total_elem_count
-        res['score'] = ppl
+        res['score'] /= math.exp(len(all_insts))
 
         # save params
         total_score, inst_count, all_max, all_min, all_mean, all_std, all_sparsity = \
@@ -301,7 +313,7 @@ if __name__ == "__main__":
     # list_sparse_tokens_all("roberta-base", sparsity_bar=1e-8, num_sentences=8000)
     
     if args['evaluation']:
-        get_em_sparsity_from_masked_lm('bert-base-uncased', samples, att_threshold=att_threshold, hs_threshold=hs_threshold)
+        get_em_sparsity_from_masked_lm('roberta-base', samples, att_threshold=att_threshold, hs_threshold=hs_threshold)
 
     if args['distribution']:
         attns, hists = get_atten_hist_from_model('bert-base-uncased', samples, att_threshold=att_threshold, hs_threshold=hs_threshold)
