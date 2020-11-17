@@ -89,7 +89,7 @@ def get_atten_hist_from_model(model_name: str, insts, att_threshold=0.0, hs_thre
         attentions = convert_att_to_np(model_output[3], input_tokens['attention_mask'])
         attn_mask = input_tokens['attention_mask'].cpu().numpy()
         hists = convert_hist_to_np(model_output[2])
-        loss = (model_output[0]).item() * len(attentions)
+        loss = (model_output[0]).item()
 
         if stored_attentions:
             with open(param_file_path + "_attention_mask.npy", "wb+") as att_mask_file:
@@ -132,7 +132,7 @@ def get_em_sparsity_from_masked_lm(model_name: str, num_sentences: int, att_thre
         batch_size = 20
         # fetch data
         all_insts = list(chunks(extract_inst_wikipedia(model_name, num_sentences), batch_size))
-        random.seed(12331)
+        random.seed(6)
 
         for batch_inst in all_insts:
             ppl, attentions, hidden_states = \
@@ -157,7 +157,7 @@ def get_em_sparsity_from_masked_lm(model_name: str, num_sentences: int, att_thre
             total_elem_count += sum([att.shape[-1] * att.shape[-1] for att in attentions])
 
         res['sparsity'] = res['sparsity'].astype(float) / total_elem_count
-        res['score'] /= float(num_sentences)
+        res['score'] /= float(len(all_insts))
         res['score'] = math.exp(res['score'])
 
         # save params
