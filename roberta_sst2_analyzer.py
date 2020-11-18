@@ -235,4 +235,4 @@ if __name__ == "__main__":
 
     if args['distribution']:
         loss, attns = get_atten_per_token('textattack/roberta-base-SST-2', samples, att_threshold=att_threshold, hs_threshold=hs_threshold)
-        tv.plot_atten_dist_per_token(attns, 100, sparse_hist=get_sparse_hist_token(attns, 1e-8), ylim=(1, 1))
+        tv.plot_atten_dist_per_token(attns, 100, sparse_hist=get_sparse_hist_token(attns, 1e-8), ylim=(0.2, 1))

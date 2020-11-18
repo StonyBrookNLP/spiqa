@@ -308,7 +308,7 @@ def get_sparsities(params_path: str, sparsity_bar=0.025, layer_aggregration='mea
                     layer_idx, head_idx)] = spars_per_head
 
         sparsity_table.at[threshold, 'all'] = np.mean(all_sparsity.flatten())
-        sparsity_table.at[threshold, 'em'] = total_score / qa_pair_count
+        sparsity_table.at[threshold, 'em'] = total_score
 
     return sparsity_table
 
@@ -637,20 +637,20 @@ def plot_em_sparsity(sparsity_data: dict, attached_title=''):
     patches = []
 
     ax.set_xlabel("sparisty")
-    ax.set_ylabel("EM score")
+    ax.set_ylabel("pseudo-perplexity")
 
     for idx, (data_label, data) in enumerate(sparsity_data.items()):
         patches.append(mpatches.Patch(color='C{}'.format(idx), label=data_label))
-        ax.plot(data['all'], data['em']*100,
+        ax.plot(data['all'], data['em'],
                 color='C{}'.format(idx), marker='s', markersize=4.5)
 
-    ax.set_ylim([30, 90])
+    # ax.set_ylim([30, 90])
     fig.suptitle(
         'Accuracy vs. Sparsity {}'.format(attached_title))
     fig.tight_layout()
     plt.legend(handles=patches, loc='upper left')
     plt.grid(linestyle='--', alpha=0.5, color='grey')
-    plt.savefig(RES_FIG_PATH+'em_vs_sparse.png', dpi=600)
+    plt.savefig(RES_FIG_PATH+'perplexity_vs_sparsity.png', dpi=600)
     plt.close(fig)
 
 
@@ -742,11 +742,11 @@ if __name__ == '__main__':
 
     if args['sparsity']:
         # compute sparsity, temperarily broken
-        stat_filtered_spars = get_sparsities('filtered_params/static')
-        dyna_filtered_spars = get_sparsities('filtered_params/dyna')
+        stat_filtered_spars = get_sparsities('filtered_params/bert-base-mlm')
+        dyna_filtered_spars = get_sparsities('filtered_params/roberta-base-mlm')
         print(stat_filtered_spars, dyna_filtered_spars)
-        plot_em_sparsity({'static': stat_filtered_spars, 'dynamic': dyna_filtered_spars})
-        plot_sparsity_change(stat_filtered_spars, attached_title='(dynamic threshold)')
+        plot_em_sparsity({'BERT': stat_filtered_spars, 'RoBERTa': dyna_filtered_spars})
+        plot_sparsity_change(stat_filtered_spars, attached_title='')
 
     if args['otf_distribution']:
         plot_dist_token_dynamic("csarron/roberta-base-squad-v1", 100, sparsity_bar=0.0, att_threshold=att_threshold, samples=samples, scale='log', attached_title='(per_token)')
