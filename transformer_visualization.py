@@ -82,7 +82,7 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, spar
     They both are in [layer, head]
     attn_max and attn_min are not required when data is a list of matrice
     """
-    offset = 1e-10
+    offset = 1e-8
     hist_x_start, hist_x_end = log(offset, 10), log(1, 10)
     if scale == 'linear':
         offset = 0.0
