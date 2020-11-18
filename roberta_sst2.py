@@ -8,7 +8,7 @@ import pandas as pd
 
 model_name = "textattack/roberta-base-SST-2"
 #config = AutoConfig.from_pretrained(model_name, output_hidden_states=True, output_attentions=True)
-
+num_samples = 50
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForSequenceClassification.from_pretrained(model_name)
 model.eval()
@@ -20,7 +20,7 @@ sentences = []
 labels = []
 #Taking 50 instances from the SST2 dataset
 for i, d in enumerate(sst2['validation']):
-    if i < 50:
+    if i < num_samples:
         sentences.append(d['sentence'])
         labels.append(d['label'])
     else:
@@ -43,13 +43,16 @@ model_output = model(**input_tokens, labels=label, output_hidden_states=True, ou
 print ("Total items in the output tuple: ",len(model_output)) 
 print ("Loss: ", model_output[0])
 
-# count = 0
-# for i, l in enumerate(labels):
-#     if l == torch.argmax(model_output[1][i]):
-#         count += 1
-# print(count)
+
 # print ("Number of layer representations of tokens and attention weights: ",len(model_output[1]), len(model_output[2]))
 # print ("Shape of each layer representation and attention weight: ", model_output[1][0].shape, model_output[2][0].shape)
+
+# EM score calculation
+count = 0
+for i, l in enumerate(labels):
+    if l == torch.argmax(model_output[1][i]):
+        count += 1
+print("EM score: ", float(count/num_samples))
 
 #Retrieving attentions for all layers for all instances
 layer_num = 12
