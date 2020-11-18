@@ -15,7 +15,7 @@ model.eval()
 
 if torch.cuda.is_available(): model = model.to("cuda")
 
-sst2 = load_dataset("glue", "sst2")
+sst2 = load_dataset("glue", "sst2", cache_dir='./data')
 sentences = []
 labels = []
 #Taking 50 instances from the SST2 dataset
@@ -37,7 +37,7 @@ if torch.cuda.is_available():
 
 label = torch.tensor(labels).unsqueeze(0)
 label = label.to("cuda")
-model_output = model(**input_tokens, labels=label, output_hidden_states=True, output_attentions=True)
+model_output = model(**input_tokens, labels=label, output_hidden_states=True, output_attentions=True, att_threshold=0.1)
 
 #Summary stat of the model_output
 print ("Total items in the output tuple: ",len(model_output)) 
