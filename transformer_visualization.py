@@ -35,6 +35,48 @@ def get_bin_edges(bin_step, hist_x_start, hist_x_end, scale):
         return None
 
 
+def get_diversity(data, bin_step, attn_max=None, attn_min=None, scale='log', model_name=''):
+    """
+    get the diversity based on the attention distribution
+    """
+    offset = 1e-8
+    hist_x_start, hist_x_end = log(offset, 10), log(1, 10)
+    if scale == 'linear':
+        offset = 0.0
+
+    attn_bins, attn_hists = get_bin_edges(bin_step, hist_x_start, hist_x_end, scale), None
+
+    if type(data) is list:
+        for inst in data:
+            inst_attn_hist = np.apply_along_axis(
+                lambda x: np.histogram(x + offset, attn_bins, range=(0.0, 1.0))[0], -1,  inst)
+            inst_attn_max, inst_attn_min = \
+                np.amax(inst, axis=(-2, -1)), np.amin(inst, axis=(-2, -1))
+
+            attn_hists = inst_attn_hist if attn_hists is None else \
+                np.concatenate([attn_hists, inst_attn_hist], axis=-2)
+            attn_max = inst_attn_max if attn_max is None else \
+                np.maximum(attn_max, inst_attn_max)
+            attn_min = inst_attn_min if attn_min is None else \
+                np.minimum(attn_min, inst_attn_min)
+
+        # Normalization
+        attn_hists = np.apply_along_axis(lambda a: a / np.sum(a), -1, attn_hists)
+    else:
+        attn_hists = data
+
+    print(attn_hists.shape)
+
+    # extract spread index
+    spread_idx = np.apply_along_axis(lambda x: np.argmax(x >= 0.5), -1, np.cumsum(attn_hists, axis=-1))
+ 
+    with open("sparsity_spread/"+model_name.replace('/', '-')+".npy", "wb+") as f:
+        np.save(f, spread_idx, allow_pickle=False)
+
+    spread_idx = np.std(spread_idx, axis = -1)
+    spread_idx = np.mean(spread_idx, axis = -1)
+    return spread_idx
+
 def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True, layer_aggregration='mean', attached_title=''):
     '''
     Plot the heat map to visualize the relation between each subwords in the
@@ -110,15 +152,6 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, spar
 
     print(attn_hists.shape)
     atten_bar_width = [attn_bins[i] - attn_bins[i-1] for i in range(1, len(attn_bins))]
-
-    # extract spread index
-    spread_idx = np.apply_along_axis(lambda x: np.argmax(x >= 0.5), -1, np.cumsum(attn_hists, axis=-1))
-    spread_idx = np.std(spread_idx, axis = -1)
-    
-    with open("sparsity_spread/"+model_name.replace('/', '-')+".npy", "wb+") as f:
-        np.save(f, spread_idx, allow_pickle=False)
-
-    return
     
     for layer_idx, layer in enumerate(attn_hists):
         print("plotting layer {}...".format(layer_idx))
@@ -241,24 +274,25 @@ def plot_hs_dist_per_token(data, bin_step, attn_mask, scale='log', attached_titl
 def plot_dist_diversity(data: dict, attached_title=''):
     """
     """
-    fig, ax = plt.subplots(3, 4, figsize=(22, 15))
-    matplotlib.rcParams.update({'font.size': 12})
-    matplotlib.rcParams.update({'xtick.labelsize': 13})
-    matplotlib.rcParams.update({'ytick.labelsize': 13})
-    patches = [mpatches.Patch(color='C{}'.format(i), label=model) for i, model in enumerate(data.keys())]
-    for head_idx in range(12):
-        curr_ax = ax[int(head_idx / 4), int(head_idx % 4)]    
-        for model_idx, model in enumerate(data.keys()):
-            spread_idx = data[model][:, head_idx].flatten()
-            curr_ax.plot(range(12), spread_idx, color='C{}'.format(model_idx), marker='s')
-
-        curr_ax.set_title('head_{}'.format(head_idx))
-        curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
-        curr_ax.legend(handles=patches, loc='upper left', ncol=len(data.keys()))
+    curr_ax = plt.subplot(111)
+    fig = plt.gcf()
     
-    fig.suptitle("Variance of density function per head{}".format(attached_title), fontsize=21, y=0.99)
-    fig.legend(handles=patches, loc='upper center', ncol=len(data.keys()), bbox_to_anchor=(0.5, 0.97))
-    fig.tight_layout(pad=2.2)
-    plt.savefig(RES_FIG_PATH+'dist_spread.png', dpi=600)
+    # matplotlib.rcParams.update({'font.size': 14})
+    # matplotlib.rcParams.update({'xtick.labelsize': 14})
+    # matplotlib.rcParams.update({'ytick.labelsize': 14})
+    patches = [mpatches.Patch(color='C{}'.format(i), label=model) for i, model in enumerate(data.keys())]
+ 
+    for model_idx, model in enumerate(data.keys()):
+        curr_ax.plot(np.arange(1, 13), data[model], color='C{}'.format(model_idx), marker='s')
+    
+    curr_ax.set_xticks(np.arange(1, 13))
+    # curr_ax.set_title('head_{}'.format(head_idx))
+    curr_ax.set_xlabel('layer')
+    curr_ax.set_ylabel('diversity')
+    curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
+    curr_ax.legend(handles=patches, loc='upper left', ncol=1)
+    
+    fig.tight_layout()
+    plt.savefig(RES_FIG_PATH+'dist_spread.pdf')
     plt.clf()
     plt.close(fig)

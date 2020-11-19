@@ -223,5 +223,7 @@ if __name__ == "__main__":
     for i in range(10):
         print("h_state mean:{:.4f}, std:{:.4f}".format(
             np.mean(hists[0][0][i*5], axis=-1), np.std(hists[0][0][i*5], axis=-1)))
+    
+    tv.get_diversity(attns, 100, model_name=model_name)
     tv.plot_atten_dist_per_token(attns, 100, sparse_hist=get_sparse_hist_token(attns, 0.0), model_name=model_name)
-    tv.plot_hs_dist_per_token(hists, 100, attn_mask, scale='linear')
+    # tv.plot_hs_dist_per_token(hists, 100, attn_mask, scale='linear')

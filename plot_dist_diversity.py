@@ -3,8 +3,8 @@ import os
 import numpy as np
 
 params_path = './sparsity_spread'
-model_list = [params_path + '/roberta-base.npy', params_path + '/roberta-base-squad-v1.npy']
-patches = ['pretrained', 'fine-tuned for QA']
+model_list = [params_path + '/roberta-base.npy', params_path + '/roberta-base-squad-v1.npy', params_path + '/roberta-base-SST-2.npy']
+patches = ['pretrained', 'SQuAD-v1.1', 'SST-2']
 
 dist_diversity = {}
 
