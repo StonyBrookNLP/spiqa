@@ -308,6 +308,7 @@ def get_sparsities(params_path: str, sparsity_bar=0.025, layer_aggregration='mea
                     layer_idx, head_idx)] = spars_per_head
 
         sparsity_table.at[threshold, 'all'] = np.mean(all_sparsity.flatten())
+        sparsity_table.at[threshold, 'rmheads'] = np.sum(all_sparsity.flatten()) / 4.0
         sparsity_table.at[threshold, 'em'] = total_score / qa_pair_count if avg_score else total_score
 
     return sparsity_table
@@ -340,7 +341,7 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
     sparsity_bar: threshold for sparsity calculation
     '''
     # set histogram x axis starting point here
-    offset = 1e-8
+    offset = 1e-20
     hist_x_start, hist_x_end = log(offset, 10), log(1+offset, 10)
 
     def get_bin_edges(bin_step, head_idx, layer_idx, scale='normal'):
@@ -434,7 +435,7 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
     computing histogram per token on-the-fly without saving the attentions in the memory
     '''
     # set histogram x axis starting point here
-    offset = 1e-10
+    offset = 1e-20
     hist_x_start, hist_x_end = log(offset, 10), log(1+offset, 10)
     if scale == 'linear':
         offset = 0.0
@@ -469,6 +470,7 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
 
     atten_bins, atten_hist, all_score = get_bin_edges(bin_step), None, 0
     all_max, all_min, all_sparse_count, sparse_hist, all_seq_len = None, None, None, None, None
+    sparse_token_count, sparse_token_percentage = None, None
 
     if os.path.isfile(hist_file_path):
         print("loading histogram from ", hist_file_path)
@@ -480,6 +482,8 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
             all_min = np.load(hist_file)
             all_sparse_count = np.load(hist_file)
             sparse_hist = np.load(hist_file)
+            sparse_token_count = np.load(hist_file)
+            sparse_token_percentage = np.load(hist_file)
     else:
         print("Running pipeline...")
         data = parse_squad_json()
@@ -515,17 +519,28 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
                                     else np.concatenate((curr_sparse_count, all_sparse_count), axis=-1)
                 all_seq_len = [att.shape[-1]] if all_seq_len is None else all_seq_len + [att.shape[-1]]
                 curr_max, curr_min = np.amax(att, axis=(-2, -1)), np.amin(att, axis=(-2, -1))
+                curr_token_count = np.cumsum(np.flip(np.sort(att, axis=-1), axis=-1), axis=-1)
+                curr_token_count = np.apply_along_axis(lambda x: np.argmax(x > 0.5), -1, curr_token_count)
+                print(curr_token_count.shape)
+                curr_token_percentage = curr_token_count / att.shape[-1]
+                print(curr_token_percentage.shape)
+                sparse_token_count = [curr_token_count] if sparse_token_count is None else  sparse_token_count + [curr_token_count]
+                sparse_token_percentage = [curr_token_percentage] if sparse_token_percentage is None else sparse_token_percentage + [curr_token_percentage]
 
             all_score += em_score
             all_max = curr_max if all_max is None else np.maximum(all_max, curr_max)
             all_min = curr_min if all_min is None else np.minimum(all_min, curr_min)
 
         atten_hist = np.concatenate(atten_hist, axis=-2)
+        sparse_token_percentage = np.concatenate(sparse_token_percentage, axis=-1)
+        sparse_token_count = np.concatenate(sparse_token_count, axis=-1)
         sparse_hist = np.apply_along_axis(lambda a: np.histogram(a, bins=10, range=(0.0, 1.0))[0], -1, all_sparse_count)
         
         print("atten_hist shape:", atten_hist.shape)
         print("sparsity shape:", all_sparse_count.shape)
         print("sparsity hist shape:", sparse_hist.shape)
+        print("sparsity count shape:", sparse_token_count.shape)
+        print("sparsity percentage shape:", sparse_token_percentage.shape)
         print("all seq shape:", len(all_seq_len))
         print("EM score", all_score / fed_data_len)
 
@@ -541,9 +556,13 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
             np.save(hist_file, all_min, allow_pickle=False)
             np.save(hist_file, all_sparse_count, allow_pickle=False)
             np.save(hist_file, sparse_hist, allow_pickle=False)
+            np.save(hist_file, sparse_token_count, allow_pickle=False)
+            np.save(hist_file, sparse_token_percentage, allow_pickle=False)
+
 
     # plot atten_hist
     tv.get_diversity(atten_hist, bin_step, all_max, all_min, model_name=model_name)
+    tv.get_focused_token_mean_std(sparse_token_count, sparse_token_percentage, model_name)
     exit()
     tv.plot_atten_dist_per_token(atten_hist, bin_step, all_max, all_min, sparse_hist=sparse_hist, model_name=model_name)
 
@@ -750,6 +769,12 @@ if __name__ == '__main__':
                         auto_scale=True, attached_title=em_str)
 
     if args['sparsity']:
+        # head sparsity:
+        roberta_squad_rmhead = get_sparsities('filtered_params/roberta-base-squad-rmheads', avg_score=True)
+        bert_squad_rmhead = get_sparsities('filtered_params/bert-base-uncased-squad-rmheads', avg_score=True)
+        roberta_sa_rmhead = get_sparsities('filtered_params/roberta-base-sa-rmhead')
+        print(bert_squad_rmhead.transpose().to_string())
+        exit()
         # compute sparsity, temperarily broken
         roberta_squad_spars = get_sparsities('filtered_params/roberta-base-squad', avg_score=True)
         roberta_mlm_spars = get_sparsities('filtered_params/roberta-base-mlm')
@@ -763,7 +788,7 @@ if __name__ == '__main__':
         # plot_sparsity_change(stat_filtered_spars, attached_title='')
 
     if args['otf_distribution']:
-        plot_dist_token_dynamic("csarron/roberta-base-squad-v1", 100, sparsity_bar=0.0, att_threshold=att_threshold, samples=samples, scale='log', attached_title='(per_token)')
+        plot_dist_token_dynamic("csarron/bert-base-uncased-squad-v1", 100, sparsity_bar=0.0, att_threshold=att_threshold, samples=samples, scale='log', attached_title='(per_token)')
 
     if args['hidden_states']:
         em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \

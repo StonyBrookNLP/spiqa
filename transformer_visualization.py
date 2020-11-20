@@ -10,7 +10,7 @@ import matplotlib.patches as mpatches
 import matplotlib.gridspec as gridspec
 from textwrap import wrap
 from math import isnan, fsum, log, ceil, floor
-
+from itertools import compress, product
 
 RES_FIG_PATH = "./res_fig/"
 
@@ -76,6 +76,60 @@ def get_diversity(data, bin_step, attn_max=None, attn_min=None, scale='log', mod
     spread_idx = np.std(spread_idx, axis = -1)
     spread_idx = np.mean(spread_idx, axis = -1)
     return spread_idx
+
+
+def get_token_sparse_count_percentage(data):
+    all_token_count, all_token_percentage = [], []
+    for inst in data:
+        curr_token_count = np.cumsum(np.flip(np.sort(inst, axis=-1), axis=-1), axis=-1)
+        curr_token_count = np.apply_along_axis(lambda x: np.argmax(x > 0.5), -1, curr_token_count)
+        print(curr_token_count.shape)
+        curr_token_percentage = curr_token_count / inst.shape[-1]
+        print(curr_token_percentage.shape)
+        all_token_count.append(curr_token_count)
+        all_token_percentage.append(curr_token_percentage)
+    
+    all_token_count = np.concatenate(all_token_count, axis=-1)
+    all_token_percentage = np.concatenate(all_token_percentage, axis=-1)
+    return all_token_count, all_token_percentage
+
+
+def get_focused_token_mean_std(count, percentage, model_name=''):
+    mean_count, mean_percentage = np.mean(count, axis=-1), np.mean(percentage, axis=-1)
+    std_count, std_percentage = np.std(count, axis=-1), np.std(percentage, axis=-1)
+    fig, ax = plt.subplots(1, 1, figsize=(24, 4))
+    indices = ["L{}H{}".format(i, j) for i, j in list(product(np.arange(1, 13), range(1, 13)))]
+
+    # ax.errorbar(indices, mean_count.flatten(), fmt='.', ecolor='grey', capsize=3, lw=1)
+    ax.errorbar(indices, mean_count.flatten(), yerr=std_count.flatten(), fmt='ok', lw=3)
+    ax.grid(linestyle='--', color='grey', alpha=0.4)
+    ax.margins(0.002)
+    # ax.set_ylim((0, 100))
+    # for l in range(12):
+    #     ax.axvspan(l*12-0.5, l*12+12-0.5, alpha=0.2, facecolor='C{}'.format(l))
+    # ax.set_xticklabels(indices, rotation=60)
+    # ax.set_yticks(np.arange(0, 110, 10))
+    # ax.set_yticklabels(['1e{}'.format(i) for i in np.arange(-20, 1, 2)])
+
+    fig.tight_layout()
+    fig.savefig(RES_FIG_PATH + 'head_consistency_count_{}.pdf'.format(model_name))
+    plt.clf()
+
+    fig, ax = plt.subplots(1, 1, figsize=(24, 4))
+    # ax.errorbar(indices, mean_count.flatten(), fmt='.', ecolor='grey', capsize=3, lw=1)
+    ax.errorbar(indices, mean_percentage.flatten(), yerr=std_percentage.flatten(), fmt='ok', lw=3)
+    ax.grid(linestyle='--', color='grey', alpha=0.4)
+    ax.margins(0.002)
+    # ax.set_ylim((0, 100))
+    # for l in range(12):
+    #     ax.axvspan(l*12-0.5, l*12+12-0.5, alpha=0.2, facecolor='C{}'.format(l))
+    # ax.set_xticklabels(indices, rotation=60)
+    # ax.set_yticks(np.arange(0, 110, 10))
+    # ax.set_yticklabels(['1e{}'.format(i) for i in np.arange(-20, 1, 2)])
+
+    fig.tight_layout()
+    fig.savefig(RES_FIG_PATH + 'head_consistency_percent_{}.pdf'.format(model_name))
+    plt.clf()
 
 def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True, layer_aggregration='mean', attached_title=''):
     '''
@@ -296,3 +350,33 @@ def plot_dist_diversity(data: dict, attached_title=''):
     plt.savefig(RES_FIG_PATH+'dist_spread.pdf')
     plt.clf()
     plt.close(fig)
+
+def plot_spread_features(stat_features, model_name):
+    fig, ax = plt.subplots(1, 1, figsize=(24, 4))
+    means, stds, maxs, mins = (i.flatten() for i in stat_features)
+    indices = ["L{}H{}".format(i, j) for i, j in list(product(np.arange(1, 13), range(1, 13)))]
+    ax.errorbar(indices, means, yerr=[means - mins, maxs - means],
+                   fmt='.', ecolor='grey', capsize=3, lw=1)
+    ax.errorbar(indices, means, yerr=stds, fmt='ok', lw=3)
+    ax.grid(linestyle='--', color='grey', alpha=0.4)
+    ax.margins(0.002)
+    ax.set_ylim((0, 100))
+    for l in range(12):
+        ax.axvspan(l*12-0.5, l*12+12-0.5, alpha=0.2, facecolor='C{}'.format(l))
+    ax.set_xticklabels(indices, rotation=60)
+    ax.set_yticks(np.arange(0, 110, 10))
+    ax.set_yticklabels(['1e{}'.format(i) for i in np.arange(-20, 1, 2)])
+
+    fig.tight_layout()
+    fig.savefig(RES_FIG_PATH + 'head_consistency_stat_{}.pdf'.format(model_name))
+    plt.clf()
+    
+    fig, ax = plt.subplots(1, 1, figsize=(24, 4))
+    ax.hist(means, 100, weights=np.ones(means.shape)*1/144.0, range=(0, 100), color='black')
+    ax.grid(linestyle='--', color='grey', alpha=0.4)
+    ax.set_xlim(0, 100)
+    ax.set_xticks(np.arange(0, 110, 10))
+    ax.set_xticklabels(['1e{}'.format(i) for i in np.arange(-20, 1, 2)])
+    fig.tight_layout()
+    fig.savefig(RES_FIG_PATH + 'head_consistency_dist_{}.pdf'.format(model_name))
+    plt.clf()
