@@ -132,6 +132,7 @@ def get_focused_token_mean_std(count, percentage, model_name=''):
     # ax.set_ylim((0, 100))
     for l in range(12):
         ax.axvspan(l*12-0.5, l*12+12-0.5, alpha=0.2, facecolor='C{}'.format(l))
+    ax.set_xticklabels(indices, Fontsize=22)
     for idx, tick in enumerate(ax.xaxis.get_major_ticks()):
         if idx % 12 !=6:
             tick.label1.set_visible(False)
