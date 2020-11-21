@@ -95,21 +95,30 @@ def get_token_sparse_count_percentage(data):
 
 
 def get_focused_token_mean_std(count, percentage, model_name=''):
+    model_name = model_name.split('/')[-1]
     mean_count, mean_percentage = np.mean(count, axis=-1), np.mean(percentage, axis=-1)
     std_count, std_percentage = np.std(count, axis=-1), np.std(percentage, axis=-1)
     fig, ax = plt.subplots(1, 1, figsize=(24, 4))
     indices = ["L{}H{}".format(i, j) for i, j in list(product(np.arange(1, 13), range(1, 13)))]
+    indices = ["{}".format(i+1) for i in range(144)]
+    for i in range(144):
+        if i%12 == 6: indices[i] = "layer {}".format(int(i/12) + 1)
 
     # ax.errorbar(indices, mean_count.flatten(), fmt='.', ecolor='grey', capsize=3, lw=1)
     ax.errorbar(indices, mean_count.flatten(), yerr=std_count.flatten(), fmt='ok', lw=3)
     ax.grid(linestyle='--', color='grey', alpha=0.4)
     ax.margins(0.002)
     # ax.set_ylim((0, 100))
-    # for l in range(12):
-    #     ax.axvspan(l*12-0.5, l*12+12-0.5, alpha=0.2, facecolor='C{}'.format(l))
-    # ax.set_xticklabels(indices, rotation=60)
-    # ax.set_yticks(np.arange(0, 110, 10))
-    # ax.set_yticklabels(['1e{}'.format(i) for i in np.arange(-20, 1, 2)])
+    for l in range(12):
+        ax.axvspan(l*12-0.5, l*12+12-0.5, alpha=0.2, facecolor='C{}'.format(l))
+    ax.set_xticklabels(indices, Fontsize=22)
+    for idx, tick in enumerate(ax.xaxis.get_major_ticks()):
+        if idx % 12 !=6:
+            tick.label1.set_visible(False)
+        else: tick.label1.set_visible(True)
+        
+    for idx, tick in enumerate(ax.yaxis.get_major_ticks()):
+        tick.label.set_fontsize(22)
 
     fig.tight_layout()
     fig.savefig(RES_FIG_PATH + 'head_consistency_count_{}.pdf'.format(model_name))
@@ -121,12 +130,16 @@ def get_focused_token_mean_std(count, percentage, model_name=''):
     ax.grid(linestyle='--', color='grey', alpha=0.4)
     ax.margins(0.002)
     # ax.set_ylim((0, 100))
-    # for l in range(12):
-    #     ax.axvspan(l*12-0.5, l*12+12-0.5, alpha=0.2, facecolor='C{}'.format(l))
-    # ax.set_xticklabels(indices, rotation=60)
-    # ax.set_yticks(np.arange(0, 110, 10))
-    # ax.set_yticklabels(['1e{}'.format(i) for i in np.arange(-20, 1, 2)])
-
+    for l in range(12):
+        ax.axvspan(l*12-0.5, l*12+12-0.5, alpha=0.2, facecolor='C{}'.format(l))
+    for idx, tick in enumerate(ax.xaxis.get_major_ticks()):
+        if idx % 12 !=6:
+            tick.label1.set_visible(False)
+        else: tick.label1.set_visible(True)
+        
+    for idx, tick in enumerate(ax.yaxis.get_major_ticks()):
+        tick.label.set_fontsize(22)
+        
     fig.tight_layout()
     fig.savefig(RES_FIG_PATH + 'head_consistency_percent_{}.pdf'.format(model_name))
     plt.clf()
