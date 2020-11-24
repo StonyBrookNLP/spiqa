@@ -662,7 +662,7 @@ def plot_em_sparsity(sparsity_data: dict, second_axis_data={}, attached_title=''
         patches.append(mpatches.Patch(color='C{}'.format(idx), label=data_label))
         scores = data['em']/data['em'].max() if normalize_score else data['em'] * 100
         ax.plot(data['all'], scores,
-                color='C{}'.format(idx), marker='s', markersize=8)
+                color='C{}'.format(idx), marker='s', markersize=4)
 
     for label in ax.yaxis.get_majorticklabels(): label.set_fontsize(15)
     
@@ -673,20 +673,46 @@ def plot_em_sparsity(sparsity_data: dict, second_axis_data={}, attached_title=''
             patches.append(mpatches.Patch(color='C{}'.format(idx+idx2+1), label=data_label))
             scores = data['em']/data['em'].max() if normalize_score else data['em']
             ax2.plot(data['all'], scores,
-                    color='C{}'.format(idx+idx2+1), marker='s', markersize=8)
+                    color='C{}'.format(idx+idx2+1), marker='s', markersize=4)
     
     for label in ax2.yaxis.get_majorticklabels(): label.set_fontsize(15)
+    ax2.invert_yaxis()
 
 
     # ax.set_ylim([30, 90])
     # fig.suptitle(
     #     'Accuracy vs. Sparsity {}'.format(attached_title))
     fig.tight_layout()
-    plt.legend(handles=patches, loc='upper left', **kwargs)
+    plt.legend(handles=patches, loc='lower left', **kwargs)
     plt.grid(linestyle='--', alpha=0.5, color='grey')
     plt.savefig(RES_FIG_PATH+'perplexity_vs_sparsity{}.pdf'.format(append_to_fname))
     plt.close(fig)
 
+def plot_em_sparsity_error_rate(sparsity_data: dict, attached_title='', append_to_fname='', **kwargs):
+    # plot em vs. sparsity
+    fig, ax = plt.subplots(figsize=(7, 5))
+    plt.xticks(fontsize=15)
+    patches = []
+    ax.set_xlabel("sparsity", fontsize=15)
+    
+    for idx, (data_label, data) in enumerate(sparsity_data.items()):
+        ax.set_ylabel("relative change", fontsize=15)
+        patches.append(mpatches.Patch(color='C{}'.format(idx), label=data_label))
+        rc = (data['em']-data['em'][0])/data['em'][0]
+        ax.plot(data['all'], rc,
+                color='C{}'.format(idx), marker='s', markersize=4)
+
+    for label in ax.yaxis.get_majorticklabels(): label.set_fontsize(15)
+
+    ax.set_xlim([0, 0.8])
+    ax.set_ylim([-0.015, 0.015])
+    # fig.suptitle(
+    #     'Accuracy vs. Sparsity {}'.format(attached_title))
+    fig.tight_layout()
+    plt.legend(handles=patches, loc='upper left', **kwargs)
+    plt.grid(linestyle='--', alpha=0.5, color='grey')
+    plt.savefig(RES_FIG_PATH+'rc_vs_sparsity{}.pdf'.format(append_to_fname))
+    plt.close(fig)
 
 def plot_stat_features(stat_features, features_to_plot=['max', 'min', 'std']):
     num_features = len(features_to_plot)
@@ -787,14 +813,14 @@ if __name__ == '__main__':
         roberta_sa_spars = get_sparsities('filtered_params/roberta-base-sa')
         bert_mlm_spars = get_sparsities('filtered_params/bert-base-mlm')
         bert_qa_spars = get_sparsities('filtered_params/bert-base-uncased-squad', avg_score=True)
-        plot_em_sparsity({'RoBERTa SQuAD': roberta_squad_spars, 'BERT SQuAD': bert_qa_spars}, \
-            second_axis_data={'RoBERTa MLM': roberta_mlm_spars, 'BERT MLM': bert_mlm_spars}, normalize_score=False, append_to_fname='_models', bbox_to_anchor=(0.01, 0.9), fontsize=15)
-        plot_em_sparsity({'SQuAD': roberta_squad_spars, 'SST-2': roberta_sa_spars}, \
-            second_axis_data={'MLM': roberta_mlm_spars}, normalize_score=False, append_to_fname='_tasks', bbox_to_anchor=(0.01, 0.74), fontsize=15)
+        plot_em_sparsity({'RoBERTa SQuAD': roberta_squad_spars, 'BERT SQuAD': bert_qa_spars, 'RoBERTa SST-2': roberta_sa_spars}, \
+            second_axis_data={'RoBERTa MLM': roberta_mlm_spars, 'BERT MLM': bert_mlm_spars}, normalize_score=False, append_to_fname='', fontsize=15)
+        plot_em_sparsity_error_rate({'RoBERTa SQuAD': roberta_squad_spars, 'BERT SQuAD': bert_qa_spars, 'RoBERTa SST-2': roberta_sa_spars, 'RoBERTa MLM': roberta_mlm_spars, 'BERT MLM': bert_mlm_spars}, \
+                                        append_to_fname='', fontsize=15)
         # plot_sparsity_change(stat_filtered_spars, attached_title='')
 
     if args['otf_distribution']:
-        plot_dist_token_dynamic("csarron/roberta-base-squad-v1", 100, sparsity_bar=0.0, att_threshold=att_threshold, samples=samples, scale='log', attached_title='(per_token)')
+        plot_dist_token_dynamic("csarron/bert-base-uncased-squad-v1", 100, sparsity_bar=0.0, att_threshold=att_threshold, samples=samples, scale='log', attached_title='(per_token)')
 
     if args['hidden_states']:
         em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \

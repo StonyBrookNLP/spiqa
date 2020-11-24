@@ -108,7 +108,10 @@ def get_focused_token_mean_std(count, percentage, model_name=''):
     ax.errorbar(indices, mean_count.flatten(), yerr=std_count.flatten(), fmt='ok', lw=3)
     ax.grid(linestyle='--', color='grey', alpha=0.4)
     ax.margins(0.002)
-    # ax.set_ylim((0, 100))
+    # ax.set_yticks([0] + [2**i for i in np.arange(1, 8, 1)])
+    # ax.set_yscale('log', basey=2)
+    # ax.set_ylim([1, 90])
+    ax.set_ylabel('average #tokens \nto majority', fontsize=22)
     for l in range(12):
         ax.axvspan(l*12-0.5, l*12+12-0.5, alpha=0.2, facecolor='C{}'.format(l))
     ax.set_xticklabels(indices, Fontsize=22)
@@ -129,6 +132,7 @@ def get_focused_token_mean_std(count, percentage, model_name=''):
     ax.errorbar(indices, mean_percentage.flatten(), yerr=std_percentage.flatten(), fmt='ok', lw=3)
     ax.grid(linestyle='--', color='grey', alpha=0.4)
     ax.margins(0.002)
+    ax.set_ylabel('average proportion of \ntokens to majority', fontsize=21)
     # ax.set_ylim((0, 100))
     for l in range(12):
         ax.axvspan(l*12-0.5, l*12+12-0.5, alpha=0.2, facecolor='C{}'.format(l))
@@ -344,21 +348,21 @@ def plot_dist_diversity(data: dict, attached_title=''):
     """
     curr_ax = plt.subplot(111)
     fig = plt.gcf()
+    plt.xticks(fontsize=17)
     
-    # matplotlib.rcParams.update({'font.size': 14})
-    # matplotlib.rcParams.update({'xtick.labelsize': 14})
-    # matplotlib.rcParams.update({'ytick.labelsize': 14})
     patches = [mpatches.Patch(color='C{}'.format(i), label=model) for i, model in enumerate(data.keys())]
  
     for model_idx, model in enumerate(data.keys()):
-        curr_ax.plot(np.arange(1, 13), data[model], color='C{}'.format(model_idx), marker='s')
+        curr_ax.plot(np.arange(1, 13), data[model], color='C{}'.format(model_idx), marker='s', markersize=7)
+    for label in curr_ax.yaxis.get_majorticklabels(): label.set_fontsize(17)
     
+    curr_ax.set_ylim([0, 5])
     curr_ax.set_xticks(np.arange(1, 13))
     # curr_ax.set_title('head_{}'.format(head_idx))
-    curr_ax.set_xlabel('layer')
-    curr_ax.set_ylabel('diversity')
+    curr_ax.set_xlabel('layer', fontsize=17)
+    curr_ax.set_ylabel('average diversity \nof all heads', fontsize=17)
     curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
-    curr_ax.legend(handles=patches, loc='upper left', ncol=1)
+    curr_ax.legend(handles=patches, loc='upper left', ncol=1, fontsize=17)
     
     fig.tight_layout()
     plt.savefig(RES_FIG_PATH+'dist_spread.pdf')

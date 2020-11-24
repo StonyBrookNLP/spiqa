@@ -212,7 +212,7 @@ def list_sparse_tokens_all(model_name, sparsity_bar=0.0, num_sentences=500):
 
 
 if __name__ == "__main__":
-    model_name = 'roberta-base'
+    model_name = 'bert-base-uncased'
     # list_sparse_tokens_all("roberta-base", sparsity_bar=1e-8, num_sentences=8000)
 
     attns, hists = get_atten_hist_from_model(model_name, 100)
