@@ -228,8 +228,8 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, spar
     for layer_idx, layer in enumerate(attn_hists):
         print("plotting layer {}...".format(layer_idx))
         for head_idx, head in enumerate(layer):
-            fig = plt.figure(constrained_layout=True)
-            gs = gridspec.GridSpec(nrows=1, ncols=2, width_ratios=[9, 1], figure=fig)
+            fig = plt.figure()
+            gs = gridspec.GridSpec(nrows=1, ncols=2, width_ratios=[8.5, 1.5], figure=fig)
             curr_ax = fig.add_subplot(gs[0, 0])
             curr_ax2 = curr_ax.twinx()
             alpha_val = 0.01
@@ -239,24 +239,28 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, spar
                 curr_ax2.plot(attn_bins[:-1], np.cumsum(row),
                              color='C3', linewidth=0.5, linestyle='-', alpha=alpha_val)
 
+            curr_ax.tick_params(labelsize=16)
+            curr_ax2.tick_params(labelsize=16)
+
             # plot sparse hist if exist:
             if sparse_hist is not None:
                 sparse_hist_ax = fig.add_subplot(gs[0, 1])
                 for i, sparsity in enumerate(sparse_hist[layer_idx][head_idx]):
-                    sparse_hist_ax.bar(0.5, width=1, height=0.1, bottom=0.1*i, alpha=sparsity, color='r')
-                    sparse_hist_ax.bar(0.5, width=1, height=0.1, bottom=0.1*i, fill=False, color='r')
-                    sparse_hist_ax.text(0.2, 0.1*(i+1)-0.07, '{:.2f}'.format(sparsity))
+                    sparse_hist_ax.bar(1, width=2, height=0.1, bottom=0.1*i, alpha=sparsity, color='r')
+                    sparse_hist_ax.bar(1, width=2, height=0.1, bottom=0.1*i, fill=False, color='r')
+                    sparse_hist_ax.text(0.1, 0.1*(i+1)-0.07, '{:.2f}'.format(sparsity), fontsize=15)
 
+                sparse_hist_ax.tick_params(labelsize=14)
                 sparse_hist_ax.yaxis.tick_right()
                 sparse_hist_ax.set_xlim([0, 1])
                 sparse_hist_ax.get_xaxis().set_visible(False)
                 sparse_hist_ax.set_ylim([0, 1.0])
-                sparse_hist_ax.set_title('sparsity\ndistribution', fontsize=10)
+                sparse_hist_ax.set_title('sparsity\ndistribution', fontsize=15)
 
-            subplot_title = 'max: {:.4f}, min: {:.4f}'.format(
-                attn_max[layer_idx][head_idx], attn_min[layer_idx][head_idx], fontsize=10)
+            # subplot_title = 'max: {:.4f}, min: {:.4f}'.format(
+            #     attn_max[layer_idx][head_idx], attn_min[layer_idx][head_idx], fontsize=10)
 
-            curr_ax.set_title('\n'.join(wrap(subplot_title, 38)))
+            # curr_ax.set_title('\n'.join(wrap(subplot_title, 38)))
             curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
             curr_ax.set_xscale(scale)
             # curr_ax.set_yscale('log')
@@ -270,9 +274,9 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, spar
             else:
                 curr_ax.set_xlim([0, 0.02])
 
-            fig.suptitle("Histogram for layer {} head {}(per token){}".format(
-                layer_idx, head_idx, attached_title), fontsize=15, y=0.97)
-            fig.tight_layout()
+            # fig.suptitle("Histogram for layer {} head {}(per token){}".format(
+                # layer_idx, head_idx, attached_title), fontsize=15, y=0.97)
+            fig.tight_layout(pad=2.2)
             plt.savefig(
                 RES_FIG_PATH+'at_hist_per_token_layer_{}_head_{}.png'.format(layer_idx, head_idx), dpi=600)
             plt.clf()
@@ -356,7 +360,7 @@ def plot_dist_diversity(data: dict, attached_title=''):
         curr_ax.plot(np.arange(1, 13), data[model], color='C{}'.format(model_idx), marker='s', markersize=7)
     for label in curr_ax.yaxis.get_majorticklabels(): label.set_fontsize(17)
     
-    curr_ax.set_ylim([0, 5])
+    # curr_ax.set_ylim([0, 5])
     curr_ax.set_xticks(np.arange(1, 13))
     # curr_ax.set_title('head_{}'.format(head_idx))
     curr_ax.set_xlabel('layer', fontsize=17)

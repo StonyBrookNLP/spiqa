@@ -212,10 +212,10 @@ def list_sparse_tokens_all(model_name, sparsity_bar=0.0, num_sentences=500):
 
 
 if __name__ == "__main__":
-    model_name = 'bert-base-uncased'
+    model_name = 'roberta-base'
     # list_sparse_tokens_all("roberta-base", sparsity_bar=1e-8, num_sentences=8000)
 
-    attns, hists = get_atten_hist_from_model(model_name, 100)
+    attns, hists = get_atten_hist_from_model(model_name, 200)
     attn_mask = [i.shape[-1] for i in attns]
     print(hists.shape, len(attn_mask))
 
@@ -224,9 +224,9 @@ if __name__ == "__main__":
         print("h_state mean:{:.4f}, std:{:.4f}".format(
             np.mean(hists[0][0][i*5], axis=-1), np.std(hists[0][0][i*5], axis=-1)))
     
-    count, percentage = tv.get_token_sparse_count_percentage(attns)
-    tv.get_focused_token_mean_std(count, percentage, model_name)
+    # count, percentage = tv.get_token_sparse_count_percentage(attns)
+    # tv.get_focused_token_mean_std(count, percentage, model_name)
 
     # tv.get_diversity(attns, 100, model_name=model_name)
-    # tv.plot_atten_dist_per_token(attns, 100, sparse_hist=get_sparse_hist_token(attns, 0.0), model_name=model_name)
+    tv.plot_atten_dist_per_token(attns, 100, sparse_hist=get_sparse_hist_token(attns, 1e-8), model_name=model_name)
     # tv.plot_hs_dist_per_token(hists, 100, attn_mask, scale='linear')

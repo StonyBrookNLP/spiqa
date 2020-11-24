@@ -8,18 +8,18 @@ from itertools import compress, product
 
 params_path = './sparsity_spread/cdfs-same-range'
 model_list = [
-                # params_path + '/roberta-base.npy', 
-                # params_path + '/roberta-base-squad-v1.npy', 
-                # params_path + '/roberta-base-SST-2.npy'
-                params_path + '/bert-base-uncased.npy',
-                params_path + '/csarron-bert-base-uncased-squad-v1.npy'
+                params_path + '/roberta-base.npy', 
+                params_path + '/roberta-base-squad-v1.npy', 
+                params_path + '/roberta-base-SST-2.npy'
+                # params_path + '/bert-base-uncased.npy',
+                # params_path + '/csarron-bert-base-uncased-squad-v1.npy'
                 ]
 patches = [
-            # 'RoBERTa', 
-            # 'RoBERTa-SQuAD', 
-            # 'roberta-SST2' 
-            'BERT', 
-            'BERT-SQuAD'
+            'RoBERTa', 
+            'RoBERTa-SQuAD', 
+            'RoBERTa-SST2' 
+            # 'BERT', 
+            # 'BERT-SQuAD'
         ]
 
 spread_analysis = {}
