@@ -11,25 +11,27 @@ import numpy as np
 import pandas as pd
 import transformer_visualization as tv
 
-import os
+import os, random
 
 PARAM_PATH = './params/'
 ATT_SIZE = [12, 12]
 
 def extract_sst2(model_name, num_sentences):
-    sst2 = load_dataset("glue", "sst2", cache_dir='./data')
+    sst2 = load_dataset("glue", "sst2", cache_dir='./data')['validation']
     sentences = []
     labels = []
     #Taking 50 instances from the SST2 dataset
-    for i, d in enumerate(sst2['validation']):
+    selected_data_id = np.random.choice(sst2.num_rows, num_sentences, replace=False)
+    for d in selected_data_id.tolist():
         tokenizer = AutoTokenizer.from_pretrained(model_name)
-        tokenized_se = tokenizer(d['sentence'], return_tensors='np')['input_ids']
-        if i < num_sentences and tokenized_se.shape[-1] < tokenizer.max_len:
-            sentences.append(d['sentence'])
-            labels.append(d['label'])
+        tokenized_se = tokenizer(sst2[d]['sentence'], return_tensors='np')['input_ids']
+        if (tokenized_se.shape[-1] < tokenizer.max_len) :
+            sentences.append(sst2[d]['sentence'])
+            labels.append(sst2[d]['label'])
         else:
             break
-
+    
+    print("actual selected: ", len(sentences))
     return sentences, labels
 
 def run_model(model_name, input_tokens, labels, att_threshold=0.0, hs_threshold=0.0, device="cuda"):
@@ -84,9 +86,8 @@ def get_atten_per_token(model_name, num_sentences, att_threshold=0.0, hs_thresho
             attn_mask = np.load(att_mask_file, allow_pickle=True)
             loss = np.load(att_mask_file, allow_pickle=True)[0]
         with open(param_file_path + "_attention.npy", "rb") as att_file:
-            attentions = [np.load(att_file) for i in range(len(attn_mask))]
-        with open(param_file_path + "_hists.npy", "rb") as hists_file:
-            hists = np.load(hists_file)
+            attentions = [np.load(att_file, allow_pickle=True) for i in range(len(attn_mask))]
+            
     else:
         # get sentences
         sentences, labels = extract_sst2(model_name, num_sentences)
@@ -107,10 +108,9 @@ def get_atten_per_token(model_name, num_sentences, att_threshold=0.0, hs_thresho
                 np.save(att_mask_file, np.array([loss]))
             with open(param_file_path + "_attention.npy", "wb+") as att_file:
                 for i in range(len(attn_mask)): np.save(att_file, attentions[i], allow_pickle=False)
-            with open(param_file_path + "_hists.npy", "wb+") as hists_file:
-                np.save(hists_file, hists, allow_pickle=False)
-        
-    print ("Shape of attention weight matrices", len(attentions), attentions[0].shape)
+    
+    for i, att in enumerate(attentions):
+        print ("Shape of attention weight matrices", i, att.shape)
     return loss, attentions
 
 def get_sparse_hist_token(attn, offset, sparsity_bar=0.0):
@@ -234,5 +234,7 @@ if __name__ == "__main__":
         get_em_sparsity_from_sa('textattack/roberta-base-SST-2', samples, att_threshold=att_threshold, hs_threshold=hs_threshold, device='cuda')
 
     if args['distribution']:
-        loss, attns = get_atten_per_token('textattack/roberta-base-SST-2', samples, att_threshold=att_threshold, hs_threshold=hs_threshold)
-        tv.plot_atten_dist_per_token(attns, 100, sparse_hist=get_sparse_hist_token(attns, 1e-8), ylim=(0.2, 1))
+        loss, attns = get_atten_per_token('textattack/roberta-base-SST-2', samples, att_threshold=att_threshold, hs_threshold=hs_threshold, stored_attentions=True)
+        tv.get_diversity(attns, 100, model_name='roberta-base-SST-2')
+        exit()
+        tv.plot_atten_dist_per_token(attns, 100, sparse_hist=get_sparse_hist_token(attns, 1e-8), ylim=(0.2, 1), model_name='roberta-base-SST-2')

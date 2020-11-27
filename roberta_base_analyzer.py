@@ -19,6 +19,7 @@ import math
 import glob
 from textwrap import wrap
 from itertools import compress, product
+import json
 
 PARAM_PATH = "./params/"
 DATA_PATH = "./data"
@@ -38,6 +39,21 @@ def extract_inst_wikipedia(num_sentences: int):
     print("extracted {} paragrahps from wikipedia".format(len(insts)))
     return insts 
 
+
+def extract_inst_squad(num_paras: int):
+    data, squad_ver = [], 'v1.1'
+    with open(DATA_PATH + '/dev-v1.1.json', "r", encoding="utf-8") as data_file:
+        squad_raw_data = json.load(data_file)["data"]
+
+        for topic in squad_raw_data:
+            for pgraph in topic["paragraphs"]:
+                data.append(pgraph["context"])
+
+    random.seed(123)
+    data = random.sample(data, num_paras)
+    return data
+
+
 def prepare_masked_tokens(model_name, num_sentences, device):
     
     input_tokens, labels = [], []
@@ -54,6 +70,7 @@ def prepare_masked_tokens(model_name, num_sentences, device):
 
     else:
         sentences = extract_inst_wikipedia(model_name, num_sentences)
+        # sentences = extract_inst_squad(num_sentences)
         tokenizer = AutoTokenizer.from_pretrained(model_name)
 
         for inst_str in sentences:
@@ -83,6 +100,7 @@ def prepare_masked_tokens(model_name, num_sentences, device):
         labels[idx] = torch.Tensor(labels[idx]).to(device).long()
 
     return input_tokens, labels
+
 
 # helper func: convert attention to numpy array in 
 # list of [inst, [layers, heads, rows, cols]]
@@ -419,4 +437,3 @@ if __name__ == "__main__":
         tv.plot_atten_dist_per_token(attns, 100, sparse_hist=get_sparse_hist_token(attns, 1e-8))
         tv.plot_atten_dist_per_token_compare(attns, 100, [(0, 2), (0, 5)])
         tv.plot_hs_dist_per_token(hists, 100, attn_mask, scale='linear')
-

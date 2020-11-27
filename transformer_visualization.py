@@ -2,6 +2,7 @@
 Plotting function for transformer hstate and attention visualization
 '''
 import numpy as np
+import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
@@ -9,7 +10,7 @@ import matplotlib.patches as mpatches
 import matplotlib.gridspec as gridspec
 from textwrap import wrap
 from math import isnan, fsum, log, ceil, floor
-
+from itertools import compress, product
 
 RES_FIG_PATH = "./res_fig/"
 
@@ -33,6 +34,120 @@ def get_bin_edges(bin_step, hist_x_start, hist_x_end, scale):
     else:
         return None
 
+
+def get_diversity(data, bin_step, attn_max=None, attn_min=None, scale='log', model_name=''):
+    """
+    get the diversity based on the attention distribution
+    """
+    offset = 1e-8
+    hist_x_start, hist_x_end = log(offset, 10), log(1, 10)
+    if scale == 'linear':
+        offset = 0.0
+
+    attn_bins, attn_hists = get_bin_edges(bin_step, hist_x_start, hist_x_end, scale), None
+
+    if type(data) is list:
+        for inst in data:
+            inst_attn_hist = np.apply_along_axis(
+                lambda x: np.histogram(x + offset, attn_bins, range=(0.0, 1.0))[0], -1,  inst)
+            inst_attn_max, inst_attn_min = \
+                np.amax(inst, axis=(-2, -1)), np.amin(inst, axis=(-2, -1))
+
+            attn_hists = inst_attn_hist if attn_hists is None else \
+                np.concatenate([attn_hists, inst_attn_hist], axis=-2)
+            attn_max = inst_attn_max if attn_max is None else \
+                np.maximum(attn_max, inst_attn_max)
+            attn_min = inst_attn_min if attn_min is None else \
+                np.minimum(attn_min, inst_attn_min)
+
+        # Normalization
+        attn_hists = np.apply_along_axis(lambda a: a / np.sum(a), -1, attn_hists)
+    else:
+        attn_hists = data
+
+    print(attn_hists.shape)
+
+    # extract spread index
+    spread_idx = np.apply_along_axis(lambda x: np.argmax(x >= 0.5), -1, np.cumsum(attn_hists, axis=-1))
+ 
+    with open("sparsity_spread/"+model_name.replace('/', '-')+".npy", "wb+") as f:
+        np.save(f, spread_idx, allow_pickle=False)
+
+    spread_idx = np.std(spread_idx, axis = -1)
+    spread_idx = np.mean(spread_idx, axis = -1)
+    return spread_idx
+
+
+def get_token_sparse_count_percentage(data):
+    all_token_count, all_token_percentage = [], []
+    for inst in data:
+        curr_token_count = np.cumsum(np.flip(np.sort(inst, axis=-1), axis=-1), axis=-1)
+        curr_token_count = np.apply_along_axis(lambda x: np.argmax(x > 0.5), -1, curr_token_count)
+        print(curr_token_count.shape)
+        curr_token_percentage = curr_token_count / inst.shape[-1]
+        print(curr_token_percentage.shape)
+        all_token_count.append(curr_token_count)
+        all_token_percentage.append(curr_token_percentage)
+    
+    all_token_count = np.concatenate(all_token_count, axis=-1)
+    all_token_percentage = np.concatenate(all_token_percentage, axis=-1)
+    return all_token_count, all_token_percentage
+
+
+def get_focused_token_mean_std(count, percentage, model_name=''):
+    model_name = model_name.split('/')[-1]
+    mean_count, mean_percentage = np.mean(count, axis=-1), np.mean(percentage, axis=-1)
+    std_count, std_percentage = np.std(count, axis=-1), np.std(percentage, axis=-1)
+    fig, ax = plt.subplots(1, 1, figsize=(24, 4))
+    indices = ["L{}H{}".format(i, j) for i, j in list(product(np.arange(1, 13), range(1, 13)))]
+    indices = ["{}".format(i+1) for i in range(144)]
+    for i in range(144):
+        if i%12 == 6: indices[i] = "layer {}".format(int(i/12) + 1)
+
+    # ax.errorbar(indices, mean_count.flatten(), fmt='.', ecolor='grey', capsize=3, lw=1)
+    ax.errorbar(indices, mean_count.flatten(), yerr=std_count.flatten(), fmt='ok', lw=3)
+    ax.grid(linestyle='--', color='grey', alpha=0.4)
+    ax.margins(0.002)
+    # ax.set_yticks([0] + [2**i for i in np.arange(1, 8, 1)])
+    # ax.set_yscale('log', basey=2)
+    # ax.set_ylim([1, 90])
+    ax.set_ylabel('average #tokens \nto majority', fontsize=22)
+    for l in range(12):
+        ax.axvspan(l*12-0.5, l*12+12-0.5, alpha=0.2, facecolor='C{}'.format(l))
+    ax.set_xticklabels(indices, Fontsize=22)
+    for idx, tick in enumerate(ax.xaxis.get_major_ticks()):
+        if idx % 12 !=6:
+            tick.label1.set_visible(False)
+        else: tick.label1.set_visible(True)
+        
+    for idx, tick in enumerate(ax.yaxis.get_major_ticks()):
+        tick.label.set_fontsize(22)
+
+    fig.tight_layout()
+    fig.savefig(RES_FIG_PATH + 'head_consistency_count_{}.pdf'.format(model_name))
+    plt.clf()
+
+    fig, ax = plt.subplots(1, 1, figsize=(24, 4))
+    # ax.errorbar(indices, mean_count.flatten(), fmt='.', ecolor='grey', capsize=3, lw=1)
+    ax.errorbar(indices, mean_percentage.flatten(), yerr=std_percentage.flatten(), fmt='ok', lw=3)
+    ax.grid(linestyle='--', color='grey', alpha=0.4)
+    ax.margins(0.002)
+    ax.set_ylabel('average proportion of \ntokens to majority', fontsize=21)
+    # ax.set_ylim((0, 100))
+    for l in range(12):
+        ax.axvspan(l*12-0.5, l*12+12-0.5, alpha=0.2, facecolor='C{}'.format(l))
+    ax.set_xticklabels(indices, Fontsize=22)
+    for idx, tick in enumerate(ax.xaxis.get_major_ticks()):
+        if idx % 12 !=6:
+            tick.label1.set_visible(False)
+        else: tick.label1.set_visible(True)
+        
+    for idx, tick in enumerate(ax.yaxis.get_major_ticks()):
+        tick.label.set_fontsize(22)
+        
+    fig.tight_layout()
+    fig.savefig(RES_FIG_PATH + 'head_consistency_percent_{}.pdf'.format(model_name))
+    plt.clf()
 
 def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True, layer_aggregration='mean', attached_title=''):
     '''
@@ -72,7 +187,7 @@ def plot_heatmap(data, sparsity_bar=0.025, auto_scale=False, binarize=True, laye
         plt.close(fig)
 
 
-def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, sparse_hist=None, scale='log', attached_title='', ylim=(0.2, 1)):
+def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, sparse_hist=None, scale='log', attached_title='', model_name='', ylim=(0.2, 1)):
     """
     plotting the attention histogram per token, stacking all plots together.
     accepted data: a list of attention matrices, with each as [layer, head, length, length]
@@ -109,12 +224,12 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, spar
 
     print(attn_hists.shape)
     atten_bar_width = [attn_bins[i] - attn_bins[i-1] for i in range(1, len(attn_bins))]
-
+    
     for layer_idx, layer in enumerate(attn_hists):
         print("plotting layer {}...".format(layer_idx))
         for head_idx, head in enumerate(layer):
-            fig = plt.figure(constrained_layout=True)
-            gs = gridspec.GridSpec(nrows=1, ncols=2, width_ratios=[9, 1], figure=fig)
+            fig = plt.figure()
+            gs = gridspec.GridSpec(nrows=1, ncols=2, width_ratios=[8.5, 1.5], figure=fig)
             curr_ax = fig.add_subplot(gs[0, 0])
             curr_ax2 = curr_ax.twinx()
             alpha_val = 0.01
@@ -124,24 +239,28 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, spar
                 curr_ax2.plot(attn_bins[:-1], np.cumsum(row),
                              color='C3', linewidth=0.5, linestyle='-', alpha=alpha_val)
 
+            curr_ax.tick_params(labelsize=16)
+            curr_ax2.tick_params(labelsize=16)
+
             # plot sparse hist if exist:
             if sparse_hist is not None:
                 sparse_hist_ax = fig.add_subplot(gs[0, 1])
                 for i, sparsity in enumerate(sparse_hist[layer_idx][head_idx]):
-                    sparse_hist_ax.bar(0.5, width=1, height=0.1, bottom=0.1*i, alpha=sparsity, color='r')
-                    sparse_hist_ax.bar(0.5, width=1, height=0.1, bottom=0.1*i, fill=False, color='r')
-                    sparse_hist_ax.text(0.2, 0.1*(i+1)-0.07, '{:.2f}'.format(sparsity))
+                    sparse_hist_ax.bar(1, width=2, height=0.1, bottom=0.1*i, alpha=sparsity, color='r')
+                    sparse_hist_ax.bar(1, width=2, height=0.1, bottom=0.1*i, fill=False, color='r')
+                    sparse_hist_ax.text(0.1, 0.1*(i+1)-0.07, '{:.2f}'.format(sparsity), fontsize=15)
 
+                sparse_hist_ax.tick_params(labelsize=14)
                 sparse_hist_ax.yaxis.tick_right()
                 sparse_hist_ax.set_xlim([0, 1])
                 sparse_hist_ax.get_xaxis().set_visible(False)
                 sparse_hist_ax.set_ylim([0, 1.0])
-                sparse_hist_ax.set_title('sparsity\ndistribution', fontsize=10)
+                sparse_hist_ax.set_title('sparsity\ndistribution', fontsize=15)
 
-            subplot_title = 'max: {:.4f}, min: {:.4f}'.format(
-                attn_max[layer_idx][head_idx], attn_min[layer_idx][head_idx], fontsize=10)
+            # subplot_title = 'max: {:.4f}, min: {:.4f}'.format(
+            #     attn_max[layer_idx][head_idx], attn_min[layer_idx][head_idx], fontsize=10)
 
-            curr_ax.set_title('\n'.join(wrap(subplot_title, 38)))
+            # curr_ax.set_title('\n'.join(wrap(subplot_title, 38)))
             curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
             curr_ax.set_xscale(scale)
             # curr_ax.set_yscale('log')
@@ -155,9 +274,9 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, spar
             else:
                 curr_ax.set_xlim([0, 0.02])
 
-            fig.suptitle("Histogram for layer {} head {}(per token){}".format(
-                layer_idx, head_idx, attached_title), fontsize=15, y=0.97)
-            fig.tight_layout()
+            # fig.suptitle("Histogram for layer {} head {}(per token){}".format(
+                # layer_idx, head_idx, attached_title), fontsize=15, y=0.97)
+            fig.tight_layout(pad=2.2)
             plt.savefig(
                 RES_FIG_PATH+'at_hist_per_token_layer_{}_head_{}.png'.format(layer_idx, head_idx), dpi=600)
             plt.clf()
@@ -336,3 +455,61 @@ def plot_atten_dist_per_token_with_names(atten_hists, token_names, offset, head_
         RES_FIG_PATH+'at_hist_named_token_layer_{}_head_{}.png'.format(head_idx[0], head_idx[1]), dpi=600)
     plt.clf()
     plt.close(fig)
+
+
+def plot_dist_diversity(data: dict, attached_title=''):
+    """
+    """
+    curr_ax = plt.subplot(111)
+    fig = plt.gcf()
+    plt.xticks(fontsize=17)
+    
+    patches = [mpatches.Patch(color='C{}'.format(i), label=model) for i, model in enumerate(data.keys())]
+ 
+    for model_idx, model in enumerate(data.keys()):
+        curr_ax.plot(np.arange(1, 13), data[model], color='C{}'.format(model_idx), marker='s', markersize=7)
+    for label in curr_ax.yaxis.get_majorticklabels(): label.set_fontsize(17)
+    
+    # curr_ax.set_ylim([0, 5])
+    curr_ax.set_xticks(np.arange(1, 13))
+    # curr_ax.set_title('head_{}'.format(head_idx))
+    curr_ax.set_xlabel('layer', fontsize=17)
+    curr_ax.set_ylabel('average diversity \nof all heads', fontsize=17)
+    curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
+    curr_ax.legend(handles=patches, loc='upper left', ncol=1, fontsize=17)
+    
+    fig.tight_layout()
+    plt.savefig(RES_FIG_PATH+'dist_spread.pdf')
+    plt.clf()
+    plt.close(fig)
+
+
+def plot_spread_features(stat_features, model_name):
+    fig, ax = plt.subplots(1, 1, figsize=(24, 4))
+    means, stds, maxs, mins = (i.flatten() for i in stat_features)
+    indices = ["L{}H{}".format(i, j) for i, j in list(product(np.arange(1, 13), range(1, 13)))]
+    ax.errorbar(indices, means, yerr=[means - mins, maxs - means],
+                   fmt='.', ecolor='grey', capsize=3, lw=1)
+    ax.errorbar(indices, means, yerr=stds, fmt='ok', lw=3)
+    ax.grid(linestyle='--', color='grey', alpha=0.4)
+    ax.margins(0.002)
+    ax.set_ylim((0, 100))
+    for l in range(12):
+        ax.axvspan(l*12-0.5, l*12+12-0.5, alpha=0.2, facecolor='C{}'.format(l))
+    ax.set_xticklabels(indices, rotation=60)
+    ax.set_yticks(np.arange(0, 110, 10))
+    ax.set_yticklabels(['1e{}'.format(i) for i in np.arange(-20, 1, 2)])
+
+    fig.tight_layout()
+    fig.savefig(RES_FIG_PATH + 'head_consistency_stat_{}.pdf'.format(model_name))
+    plt.clf()
+    
+    fig, ax = plt.subplots(1, 1, figsize=(24, 4))
+    ax.hist(means, 100, weights=np.ones(means.shape)*1/144.0, range=(0, 100), color='black')
+    ax.grid(linestyle='--', color='grey', alpha=0.4)
+    ax.set_xlim(0, 100)
+    ax.set_xticks(np.arange(0, 110, 10))
+    ax.set_xticklabels(['1e{}'.format(i) for i in np.arange(-20, 1, 2)])
+    fig.tight_layout()
+    fig.savefig(RES_FIG_PATH + 'head_consistency_dist_{}.pdf'.format(model_name))
+    plt.clf()
