@@ -91,7 +91,7 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, spar
     if type(data) is list:
         for inst in data:
             inst_attn_hist = np.apply_along_axis(
-                lambda x: np.histogram(x + offset, attn_bins)[0], -1,  inst)
+                lambda x: np.histogram(x + offset, attn_bins, range=(0.0, 1.0))[0], -1,  inst)
             inst_attn_max, inst_attn_min = \
                 np.amax(inst, axis=(-2, -1)), np.amin(inst, axis=(-2, -1))
 
@@ -164,6 +164,69 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, spar
             plt.close(fig)
 
 
+def plot_atten_dist_per_token_compare(data, bin_step, heads_idx, attn_max=None, attn_min=None, scale='log', attached_title='', ylim=0.2):
+    """
+    plotting the attention histogram per token, stacking all plots together.
+    accepted data: a list of attention matrices, with each as [layer, head, length, length]
+    or a numpy array storing rows of histograms in [layer, head, length, bin_step]
+    attn_max and attn_min provides the max/min values per head across all insts. 
+    They both are in [layer, head]
+    attn_max and attn_min are not required when data is a list of matrice
+    """
+    offset = 1e-8
+    hist_x_start, hist_x_end = log(offset, 10), log(1, 10)
+    if scale == 'linear':
+        offset = 0.0
+
+    attn_bins, attn_hists = get_bin_edges(bin_step, hist_x_start, hist_x_end, scale), None
+
+    if type(data) is list:
+        for inst in data:
+            inst_attn_hist = np.apply_along_axis(
+                lambda x: np.histogram(x + offset, attn_bins, range=(0.0, 1.0))[0], -1,  inst)
+
+            attn_hists = inst_attn_hist if attn_hists is None else \
+                np.concatenate([attn_hists, inst_attn_hist], axis=-2)
+
+        # Normalization
+        attn_hists = np.apply_along_axis(lambda a: a / np.sum(a), -1, attn_hists)
+    else:
+        attn_hists = data
+
+    print(attn_hists.shape)
+    atten_bar_width = [attn_bins[i] - attn_bins[i-1] for i in range(1, len(attn_bins))]
+
+    heads_to_print = [attn_hists[l, h, :, :] for l, h in heads_idx]
+
+    fig = plt.figure()
+    curr_ax = fig.add_subplot(111)
+    alpha_val = 0.01
+    for head_idx, head in enumerate(heads_to_print):
+        for row in head:
+            curr_ax.plot(attn_bins[:-1], row, atten_bar_width,
+                             color='C{}'.format(head_idx), linewidth=0.5, linestyle='-', alpha=alpha_val)
+
+    patches = [mpatches.Patch(color='C{}'.format(idx), label='layer {} head {}'.format(l, h)) for idx, (l, h) in enumerate(heads_idx)]
+
+    curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
+    curr_ax.set_xscale(scale)
+    # curr_ax.set_yscale('log')
+    curr_ax.set_yticks(np.linspace(0, ylim, 11))
+    curr_ax.set_ylim((0, ylim))
+
+    if scale == 'log':
+        curr_ax.set_xlim([10 ** hist_x_start - 10 ** (hist_x_start-1), 1])
+    else:
+        curr_ax.set_xlim([0, 0.02])
+
+    fig.legend(handles=patches, loc='upper left', ncol=1, bbox_to_anchor=(0.11, 0.93))
+    fig.tight_layout(pad=2.2)
+    plt.savefig(
+        RES_FIG_PATH+'at_hist_per_token_compare.png', dpi=600)
+    plt.clf()
+    plt.close(fig)
+
+
 def plot_hs_dist_per_token(data, bin_step, attn_mask, scale='log', attached_title='', ylim=(0.2, 1)):
     """
     plotting hidden states per token's distribution.
@@ -225,5 +288,51 @@ def plot_hs_dist_per_token(data, bin_step, attn_mask, scale='log', attached_titl
     fig.legend(handles=patches, loc='upper center', ncol=4, bbox_to_anchor=(0.5, 0.97))
     fig.tight_layout(pad=2.2)
     plt.savefig(RES_FIG_PATH+'hs_hist_per_token.png', dpi=600)
+    plt.clf()
+    plt.close(fig)
+
+def plot_atten_dist_per_token_with_names(atten_hists, token_names, offset, head_idx=(0, 0)):
+    """
+    plot attention distribution with token names
+    """
+    if atten_hists.shape[0] < len(token_names):
+        raise ValueError("token length in the attention should be larger than token list length!")
+
+    fig = plt.figure()
+    curr_ax = fig.add_subplot(111)
+    # curr_ax2 = curr_ax.twinx()
+    hist_x_start, hist_x_end = log(offset, 10), log(1, 10)
+    attn_bins = get_bin_edges(100, hist_x_start, hist_x_end, 'log')
+    atten_bar_width = [attn_bins[i] - attn_bins[i-1] for i in range(1, len(attn_bins))]
+
+    special_token_list, insert_counter = {}, 0
+    for token in token_names: 
+        if not token in special_token_list:
+            special_token_list[token] = 'C{}'.format(insert_counter)
+            insert_counter += 1
+    
+    for token_idx, row in enumerate(atten_hists):
+        if token_idx < len(token_names):
+            curr_ax.plot(attn_bins[:-1], np.cumsum(row), atten_bar_width,
+                        color=special_token_list[token_names[token_idx]], linewidth=0.5, linestyle='-', alpha=0.8)
+        else:
+            curr_ax.plot(attn_bins[:-1], np.cumsum(row), atten_bar_width,
+                        color='black', linewidth=0.5, linestyle='-.', alpha=0.3)
+        # curr_ax2.plot(attn_bins[:-1], np.cumsum(row),
+        #              color='C3', linewidth=0.5, linestyle='-', alpha=alpha_val)
+
+    curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
+    curr_ax.set_yticks(np.linspace(0, 1.0, 11))
+    # curr_ax2.set_yticks(np.linspace(0, ylim[1], 11))
+    curr_ax.set_ylim((0, 1.0))
+    # curr_ax2.set_ylim((0, ylim[1]))
+    curr_ax.set_xscale('log')
+    curr_ax.set_xlim([10 ** hist_x_start - 10 ** (hist_x_start-1), 1])
+
+    patches = [mpatches.Patch(color=c, label=token) for token, c in special_token_list.items()]
+    curr_ax.legend(handles=patches, loc='upper left', ncol=1, prop={'size': 7})
+    fig.suptitle("Histogram for layer {} head {}(per token)".format(head_idx[0], head_idx[1]))
+    plt.savefig(
+        RES_FIG_PATH+'at_hist_named_token_layer_{}_head_{}.png'.format(head_idx[0], head_idx[1]), dpi=600)
     plt.clf()
     plt.close(fig)
