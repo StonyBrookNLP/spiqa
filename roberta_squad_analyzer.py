@@ -573,7 +573,7 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
     # plot atten_hist
     tv.get_diversity(atten_hist, bin_step, all_max, all_min, model_name=model_name)
     tv.get_focused_token_mean_std(sparse_token_count, sparse_token_percentage, model_name)
-    exit()
+    # exit()
     tv.plot_atten_dist_per_token(atten_hist, bin_step, all_max, all_min, sparse_hist=sparse_hist, model_name=model_name)
 
     # plot sparsity histogram when sampling:

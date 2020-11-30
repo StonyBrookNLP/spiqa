@@ -3,7 +3,7 @@ roberta base analyzer: analyzer sparsity of the roberta base
 """
 
 from transformers import pipeline
-from transformers import AutoTokenizer, AutoModelForMaskedLM
+from transformers import AutoTokenizer, AutoModelForMaskedLM, AutoModel
 from datasets import load_dataset
 import torch
 import numpy as np
@@ -24,7 +24,7 @@ import json
 PARAM_PATH = "./params/"
 DATA_PATH = "./data"
 
-def extract_inst_wikipedia(num_sentences: int):
+def extract_inst_wikipedia(model_name, num_sentences: int):
     dataset = load_dataset("wikipedia", "20200501.en", cache_dir=DATA_PATH, split='train[:10%]')
     random.seed(12331)
     dataset = random.sample(dataset['text'], num_sentences)
@@ -84,7 +84,7 @@ def prepare_masked_tokens(model_name, num_sentences, device):
                 masked_ids[idx][random_idx[idx]] = tokenizer.mask_token_id
             input_token['input_ids'] = masked_ids
             input_token['attention_mask'] = np.stack([input_token['attention_mask'][0]] * len(random_idx))
-            if input_token.get('token_type_ids', 0) != 0:
+            if input_token.get('token_type_ids', None) is not None:
                 input_token['token_type_ids'] = np.stack([input_token['token_type_ids'][0]] * len(random_idx))
             input_tokens.append(input_token)
             labels.append(label)
@@ -112,45 +112,66 @@ def convert_att_to_np(x, attn_mask):
     return res
 
 def convert_hist_to_np(x): return np.asarray([layer.cpu().numpy() for layer in x])
-    
 
-def get_atten_hist_from_model(model_name: str, input_tokens, labels=None, att_threshold=0.0, hs_threshold=0.0, stored_attentions=False, device='cuda'):
+def get_atten_hist_from_model(model_name: str, num_sentences: int, att_threshold=0.0, hs_threshold=0.0, stored_attentions=False, device='cuda'):
     param_file_path = PARAM_PATH + model_name
     head_mask = None
 
-    attentions, attn_mask, hists, loss = None, None, None, 0.0
+    attentions, attn_mask, hists = None, None, None
     if os.path.isfile(param_file_path + "_attention.npy") and stored_attentions:
         print("loading parameters from file...")
         with open(param_file_path + "_attention_mask.npy", "rb") as att_mask_file:
             attn_mask = np.load(att_mask_file, allow_pickle=True)
-            loss = np.load(att_mask_file, allow_pickle=True)[0]
         with open(param_file_path + "_attention.npy", "rb") as att_file:
             attentions = [np.load(att_file) for i in range(len(attn_mask))]
         with open(param_file_path + "_hists.npy", "rb") as hists_file:
             hists = np.load(hists_file)
     else:
+        sentences = extract_inst_wikipedia(model_name, num_sentences)
+        # sentences = extract_inst_squad(num_sentences)
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        input_tokens = tokenizer(sentences, padding=True, return_tensors='pt')
+        for k in input_tokens.keys():
+            input_tokens[k] = input_tokens[k].to(device)
+
         model = AutoModelForMaskedLM.from_pretrained(model_name)
         if torch.cuda.is_available(): model = model.to(device)
 
         # run model
         with torch.no_grad():
-            model_output = model(**input_tokens, output_hidden_states=True, output_attentions=True, labels=labels, \
+            model_output = model(**input_tokens, output_hidden_states=True, output_attentions=True, \
                                     att_threshold=att_threshold, hs_threshold=hs_threshold, head_mask=head_mask)
         
-        
-        attentions = convert_att_to_np(model_output[3], input_tokens['attention_mask'])
-        
-        hists = convert_hist_to_np(model_output[2])
-        loss = (model_output[0]).item() * labels.size()[0]
+        attentions = convert_att_to_np(model_output[2], input_tokens['attention_mask'])
+        hists = convert_hist_to_np(model_output[1])
 
         if stored_attentions:
             with open(param_file_path + "_attention_mask.npy", "wb+") as att_mask_file:
                 np.save(att_mask_file, attn_mask)
-                np.save(att_mask_file, np.array([loss]))
             with open(param_file_path + "_attention.npy", "wb+") as att_file:
                 for i in range(len(attn_mask)): np.save(att_file, attentions[i], allow_pickle=False)
             with open(param_file_path + "_hists.npy", "wb+") as hists_file:
                 np.save(hists_file, hists, allow_pickle=False)
+        
+    print ("Shape of attention weight matrices", len(attentions), attentions[0].shape)
+    return attentions, hists
+
+def evaluate_model(model_name: str, input_tokens, labels=None, att_threshold=0.0, hs_threshold=0.0, device='cuda'):
+    head_mask = None
+
+    attentions, attn_mask, hists, loss = None, None, None, 0.0
+    model = AutoModelForMaskedLM.from_pretrained(model_name)
+    if torch.cuda.is_available(): model = model.to(device)
+    # run model
+    with torch.no_grad():
+        model_output = model(**input_tokens, output_hidden_states=True, output_attentions=True, labels=labels, \
+                                att_threshold=att_threshold, hs_threshold=hs_threshold, head_mask=head_mask)
+    
+    
+    attentions = convert_att_to_np(model_output[3], input_tokens['attention_mask'])
+    
+    hists = convert_hist_to_np(model_output[2])
+    loss = (model_output[0]).item() * labels.size()[0]
         
     print ("Shape of attention weight matrices", len(attentions), attentions[0].shape)
     return loss, attentions, hists
@@ -188,7 +209,7 @@ def get_em_sparsity_from_masked_lm(model_name: str, num_sentences: int, att_thre
         for batch_inputs, batch_labels in zip(all_input_tokens, all_labels):
             inst_count += len(batch_labels)
             ppl, attentions, hidden_states = \
-                get_atten_hist_from_model(model_name, batch_inputs, batch_labels, att_threshold=att_threshold, hs_threshold=hs_threshold, device=device)
+                evaluate_model(model_name, batch_inputs, batch_labels, att_threshold=att_threshold, hs_threshold=hs_threshold, device=device)
                 
             def get_spars(x, axis): 
                 return x.shape[-1] ** 2 - np.count_nonzero(x[:, :, :, :], axis=axis)
@@ -253,7 +274,7 @@ def get_sampled_tokens(model_name, num_tokens, head_idx=(0, 0)):
     if torch.cuda.is_available(): model = model.to("cuda")
     
     # fetch data:
-    insts = extract_inst_wikipedia(20)
+    insts = extract_inst_wikipedia(model_name, 20)
     input_tokens = tokenizer.batch_encode_plus(insts, padding=True, return_tensors="pt")   
     # run model
     if torch.cuda.is_available(): 
@@ -328,7 +349,7 @@ def list_sparse_tokens_per_inst(model_name, sparsity_bar=0.0, num_sentences=1):
     if torch.cuda.is_available(): model = model.to("cuda")
     
     # fetch data:
-    insts = extract_inst_wikipedia(num_sentences)
+    insts = extract_inst_wikipedia(model_name, num_sentences)
     # insts = ["The girl ran to a local pub to escape the din of her city."]
 
     for inst_idx, inst in enumerate(insts):
@@ -403,6 +424,7 @@ def list_sparse_tokens_all(model_name, sparsity_bar=0.0, num_sentences=500):
 
 
 if __name__ == "__main__":
+    model_name = 'bert-base-uncased'
     arg_parser = ag.ArgumentParser(description=__doc__)
     arg_parser.add_argument("-at", "--att_threshold", default=0.0,
                             required=False, help="set attention sparsity threshold")
@@ -423,10 +445,10 @@ if __name__ == "__main__":
     # list_sparse_tokens_all("roberta-base", sparsity_bar=1e-8, num_sentences=8000)
     
     if args['evaluation']:
-        get_em_sparsity_from_masked_lm('roberta-base', samples, att_threshold=att_threshold, hs_threshold=hs_threshold)
+        get_em_sparsity_from_masked_lm(model_name, samples, att_threshold=att_threshold, hs_threshold=hs_threshold)
 
     if args['distribution']:
-        attns, hists = get_atten_hist_from_model('bert-base-uncased', samples, att_threshold=att_threshold, hs_threshold=hs_threshold)
+        attns, hists = get_atten_hist_from_model(model_name, samples, att_threshold=att_threshold, hs_threshold=hs_threshold)
         attn_mask = [i.shape[-1] for i in attns]
         print(hists.shape, len(attn_mask))
 
