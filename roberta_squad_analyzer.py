@@ -75,7 +75,7 @@ def parse_squad_json(squad_ver='v1.1'):
 #         ""
 #     )
 
-def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, sample_inputs=-1, att_threshold=0.0, hs_threshold=0.0):
+def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, sample_inputs=-1, att_threshold=0.0, hs_threshold=0.0, quantize_base=0.0):
     '''
     run question answering pipeline. 
     filter inputs: filter out the question-context pairs that have lengths out of 
@@ -132,7 +132,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
     for qa_pair in fed_data:
         print("running pipeline iter {}/{}...".format(pipeline_running_counter, fed_data_len))
         prediction = qa_pipeline(
-            {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=MAX_SEQ_LEN, att_threshold=att_threshold, hs_threshold=hs_threshold, head_mask=head_mask)
+            {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=MAX_SEQ_LEN, att_threshold=att_threshold, hs_threshold=hs_threshold, head_mask=head_mask, quantize=quantize_base)
         em_score = max(compute_exact(prediction['answer'], gold_ans)
                        for gold_ans in qa_pair['answers'])
         att_array = prediction['attentions']
@@ -191,7 +191,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
     return res
 
 
-def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True, single_input=True, sample_inputs=-1, layer_aggregration='mean', att_threshold=0.0, hs_threshold = 0.0):
+def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True, single_input=True, sample_inputs=-1, layer_aggregration='mean', att_threshold=0.0, hs_threshold = 0.0, quantize_base = 0.0):
     '''
     get the hidden state and attention from pipeline result. 
     The model_name should be a valid Huggingface transformer model. 
@@ -239,7 +239,7 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
         print("Extracting attentions from model...")
         predictions = run_qa_pipeline(
             model_name, filter_inputs=filter_inputs, single_input=single_input, \
-            sample_inputs=sample_inputs, att_threshold=att_threshold, hs_threshold=hs_threshold)
+            sample_inputs=sample_inputs, att_threshold=att_threshold, hs_threshold=hs_threshold, quantize_base=quantize_base)
 
         total_score, all_hidden_states, all_attentions, qa_pair_count, \
             all_max, all_min, all_mean, all_std, all_sparsity = \
@@ -749,6 +749,8 @@ def plot_stat_features(stat_features, features_to_plot=['max', 'min', 'std']):
 
 
 if __name__ == '__main__':
+    model_name = 'csarron/roberta-base-squad-v1'
+
     arg_parser = ag.ArgumentParser(description=__doc__)
     arg_parser.add_argument("-at", "--att_threshold", default=0.0,
                             required=False, help="set attention sparsity threshold")
@@ -762,28 +764,33 @@ if __name__ == '__main__':
                             required=False, help="print heatmap")
     arg_parser.add_argument("-s", "--sparsity", default=False, action='store_true',
                             required=False, help="compute sparsity")
+    arg_parser.add_argument("-q", "--quantization", default=False, action='store_true',
+                            required=False, help='quantize the attention')
     arg_parser.add_argument("-od", "--otf_distribution", default=False, action='store_true',
                             required=False, help='print attention histogram without saving aggregrated params')
     arg_parser.add_argument("-hs", "--hidden_states", default=False, action='store_true',
                             required=False, help='print hidden states histogram without saving aggregrated params')
     arg_parser.add_argument("-sa", "--samples", default=-1,
                             required=False, help="number of samples for distribution")
+    arg_parser.add_argument("-qb", "--quantize_base", default=0.0,
+                            required=False, help="base for quantization")
 
     args = vars(arg_parser.parse_args())
     att_threshold = float(args['att_threshold'])
     hs_threshold = float(args['hs_threshold'])
+    quant_base = float(args['quantize_base'])
     samples = int(args['samples'])
 
     if args['evaluation']:
         em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \
-            get_hstates_attens("csarron/BERT-base-uncased-squad-v1", filter_inputs=False, force_reinfer=False,
-                               single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples)
+            get_hstates_attens(model_name, filter_inputs=False, force_reinfer=False,
+                               single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples, quantize_base=quant_base)
         em_str = 'EM={:.2f}'.format(em_score*100)
 
     if args['distribution']:
         em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \
-            get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False,
-                               single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples)
+            get_hstates_attens(model_name, filter_inputs=False, force_reinfer=False,
+                               single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples, quantize_base=quant_base)
         em_str = 'EM={:.2f}'.format(em_score*100)
         stat_features = get_stat_features(
             {'max': att_max, 'min': att_min, 'mean': att_mean, 'std': att_std})
@@ -824,16 +831,19 @@ if __name__ == '__main__':
         bert_qa_spars = get_sparsities('filtered_params/bert-base-uncased-squad', avg_score=True)
         plot_em_sparsity({'RoBERTa SQuAD': roberta_squad_spars, 'BERT SQuAD': bert_qa_spars, 'RoBERTa SST-2': roberta_sa_spars}, \
             second_axis_data={'RoBERTa MLM': roberta_mlm_spars, 'BERT MLM': bert_mlm_spars}, normalize_score=False, append_to_fname='', fontsize=15)
-        plot_em_sparsity_error_rate({'RoBERTa SQuAD': roberta_squad_spars, 'BERT SQuAD': bert_qa_spars, 'RoBERTa SST-2': roberta_sa_spars, 'RoBERTa MLM': roberta_mlm_spars, 'BERT MLM': bert_mlm_spars}, \
-                                        append_to_fname='', fontsize=15)
+        plot_em_sparsity_error_rate({'RoBERTa SQuAD': roberta_squad_spars, \
+                                        'BERT SQuAD': bert_qa_spars, \
+                                        'RoBERTa SST-2': roberta_sa_spars, \
+                                        'RoBERTa MLM': roberta_mlm_spars, \
+                                        'BERT MLM': bert_mlm_spars}, append_to_fname='', fontsize=15)
         # plot_sparsity_change(stat_filtered_spars, attached_title='')
 
     if args['otf_distribution']:
-        plot_dist_token_dynamic("csarron/bert-base-uncased-squad-v1", 100, sparsity_bar=0.0, att_threshold=att_threshold, samples=samples, scale='log', attached_title='(per_token)')
+        plot_dist_token_dynamic(model_name, 100, sparsity_bar=0.0, att_threshold=att_threshold, samples=samples, scale='log', attached_title='(per_token)')
 
     if args['hidden_states']:
         em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \
-            get_hstates_attens("csarron/roberta-base-squad-v1", filter_inputs=False, force_reinfer=False,
+            get_hstates_attens(model_name, filter_inputs=False, force_reinfer=False,
                                single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples)
         attn_mask = [i.shape[-1] for i in attens]
         # h_state sanity check
@@ -841,3 +851,13 @@ if __name__ == '__main__':
         #     print("h_state mean:{:.4f}, std:{:.4f}".format(
         #         np.mean(h_states[0][0][i*5], axis=-1), np.std(h_states[0][0][i*5], axis=-1)))
         tv.plot_hs_dist_per_token(h_states, 100, attn_mask, scale='linear')
+
+    if args['quantization']:
+        em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \
+            get_hstates_attens(model_name, filter_inputs=False, force_reinfer=False,
+                               single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples)
+        em_str = 'EM={:.2f}'.format(em_score*100)
+        # quantization
+        effective_attens = [atten[:, :, :atten.shape[-1], :] for atten in attens]
+        quant_att = tv.quantize_attention(effective_attens)
+        tv.plot_atten_dist_per_token_compare_models(effective_attens, quant_att, 100)

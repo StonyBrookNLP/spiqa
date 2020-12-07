@@ -283,9 +283,10 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, spar
             plt.close(fig)
 
 
-def plot_atten_dist_per_token_compare(data, bin_step, heads_idx, attn_max=None, attn_min=None, scale='log', attached_title='', ylim=0.2):
+def plot_atten_dist_per_token_compare_heads(data, bin_step, heads_idx, attn_max=None, attn_min=None, scale='log', attached_title='', ylim=0.2):
     """
-    plotting the attention histogram per token, stacking all plots together.
+    plotting the attention histogram per token, stacking all plots together and compare 
+    multiple heads in a same plot.
     accepted data: a list of attention matrices, with each as [layer, head, length, length]
     or a numpy array storing rows of histograms in [layer, head, length, bin_step]
     attn_max and attn_min provides the max/min values per head across all insts. 
@@ -343,6 +344,69 @@ def plot_atten_dist_per_token_compare(data, bin_step, heads_idx, attn_max=None, 
     plt.savefig(
         RES_FIG_PATH+'at_hist_per_token_compare.png', dpi=600)
     plt.clf()
+    plt.close(fig)
+
+
+def plot_atten_dist_per_token_compare_models(data_att0, data_att1, bin_step, scale='log', attached_title='', ylim=1.1):
+    """
+    plotting the attention histogram per token, stacking all plots together and compare attentions for different models
+    accepted data: a list of attention matrices, with each as [layer, head, length, length]
+    """
+    offset = 1e-10
+    hist_x_start, hist_x_end = log(offset, 10), log(1, 10)
+    if scale == 'linear':
+        offset = 0.0
+
+    attn_bins, attn_hists = get_bin_edges(bin_step, hist_x_start, hist_x_end, scale), []
+
+    for data in [data_att0, data_att1]:
+        single_attn_hist = None
+        for inst in data:
+            inst_attn_hist = np.apply_along_axis(
+                lambda x: np.histogram(x + offset, attn_bins, range=(0.0, 1.0))[0], -1,  inst)
+
+            single_attn_hist = inst_attn_hist if single_attn_hist is None else \
+                np.concatenate([single_attn_hist, inst_attn_hist], axis=-2)
+
+        # Normalization
+        attn_hists.append(np.apply_along_axis(lambda a: a / np.sum(a), -1, single_attn_hist))
+
+    print(attn_hists[0].shape)
+    atten_bar_width = [attn_bins[i] - attn_bins[i-1] for i in range(1, len(attn_bins))]
+    
+    alpha_val = 0.01
+    
+    for layer_idx, (layer_att0, layer_att1) in enumerate(zip(*attn_hists)):
+        for head_idx, (head_att0, head_att1) in enumerate(zip(layer_att0, layer_att1)):
+            fig = plt.figure()
+            curr_ax = fig.add_subplot(111)
+            for row in head_att0:
+                curr_ax.plot(attn_bins[:-1], np.cumsum(row), atten_bar_width,
+                                color='C0', linewidth=0.5, linestyle='-', alpha=alpha_val)
+            for row in head_att1:
+                curr_ax.plot(attn_bins[:-1], np.cumsum(row), atten_bar_width,
+                                color='C1', linewidth=0.5, linestyle='-', alpha=alpha_val)
+
+            patches = [mpatches.Patch(color='C0', label='original'), mpatches.Patch(color='C1', label='quantized')]
+
+            curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
+            curr_ax.set_xscale(scale)
+            # curr_ax.set_yscale('log')
+            curr_ax.set_yticks(np.linspace(0, ylim, 11))
+            curr_ax.set_ylim((0, ylim))
+
+            if scale == 'log':
+                curr_ax.set_xlim([10 ** hist_x_start - 10 ** (hist_x_start-1), 1])
+            else:
+                curr_ax.set_xlim([0, 0.02])
+
+            curr_ax.legend(handles=patches, loc='upper left', ncol=1)
+            fig.tight_layout()
+            plt.savefig(RES_FIG_PATH + \
+                        'at_hist_per_token_compmodel_layer{}head{}{}.png'.format(layer_idx, head_idx, attached_title), \
+                        dpi=600)
+            plt.clf() 
+           
     plt.close(fig)
 
 
@@ -513,3 +577,14 @@ def plot_spread_features(stat_features, model_name):
     fig.tight_layout()
     fig.savefig(RES_FIG_PATH + 'head_consistency_dist_{}.pdf'.format(model_name))
     plt.clf()
+
+
+def quantize_attention(atts: list):
+    def uniform_quant(att, base):
+        ret_att = np.floor(att / base + 0.5) * base
+        return ret_att
+
+    ret = [uniform_quant(att, 2e-5) for att in atts]
+    return ret
+
+
