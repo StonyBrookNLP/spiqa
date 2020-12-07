@@ -584,7 +584,9 @@ def quantize_attention(atts: list):
         ret_att = np.floor(att / base + 0.5) * base
         return ret_att
 
-    ret = [uniform_quant(att, 2e-5) for att in atts]
+    bits = 16
+    base = 1.0/(2**bits)
+    ret = [uniform_quant(att, base) for att in atts]
     return ret
 
 
