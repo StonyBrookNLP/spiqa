@@ -764,7 +764,7 @@ if __name__ == '__main__':
                             required=False, help="print heatmap")
     arg_parser.add_argument("-s", "--sparsity", default=False, action='store_true',
                             required=False, help="compute sparsity")
-    arg_parser.add_argument("-q", "--quantization", default=False, action='store_true',
+    arg_parser.add_argument("-qv", "--quant_visualize", default=False, action='store_true',
                             required=False, help='quantize the attention')
     arg_parser.add_argument("-od", "--otf_distribution", default=False, action='store_true',
                             required=False, help='print attention histogram without saving aggregrated params')
@@ -852,7 +852,7 @@ if __name__ == '__main__':
         #         np.mean(h_states[0][0][i*5], axis=-1), np.std(h_states[0][0][i*5], axis=-1)))
         tv.plot_hs_dist_per_token(h_states, 100, attn_mask, scale='linear')
 
-    if args['quantization']:
+    if args['quant_visualize']:
         em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \
             get_hstates_attens(model_name, filter_inputs=False, force_reinfer=False,
                                single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples)

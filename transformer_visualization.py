@@ -579,12 +579,79 @@ def plot_spread_features(stat_features, model_name):
     plt.clf()
 
 
+def plot_em_sparsity(sparsity_data: dict, second_axis_data={}, attached_title='', normalize_score=False, append_to_fname='', **kwargs):
+    # plot em vs. sparsity
+    fig, ax = plt.subplots(figsize=(7, 5))
+    plt.xticks(fontsize=15)
+    patches = []
+    ax.set_xlabel("sparsity", fontsize=15)
+    
+    for idx, (data_label, data) in enumerate(sparsity_data.items()):
+        ax.set_ylabel("EM score", fontsize=15)
+        patches.append(mpatches.Patch(color='C{}'.format(idx), label=data_label))
+        scores = data['em']/data['em'].max() if normalize_score else data['em'] * 100
+        ax.plot(data['all'], scores,
+                color='C{}'.format(idx), marker='s', markersize=4)
+
+    for label in ax.yaxis.get_majorticklabels(): label.set_fontsize(15)
+    
+    if len(second_axis_data.keys()) > 0:
+        ax2 = ax.twinx()
+        ax2.set_ylabel('pseudo-perplexity', fontsize=15)
+        for idx2, (data_label, data) in enumerate(second_axis_data.items()):
+            patches.append(mpatches.Patch(color='C{}'.format(idx+idx2+1), label=data_label))
+            scores = data['em']/data['em'].max() if normalize_score else data['em']
+            ax2.plot(data['all'], scores,
+                    color='C{}'.format(idx+idx2+1), marker='s', markersize=4)
+    
+    for label in ax2.yaxis.get_majorticklabels(): label.set_fontsize(15)
+    ax2.invert_yaxis()
+
+
+    # ax.set_ylim([30, 90])
+    # fig.suptitle(
+    #     'Accuracy vs. Sparsity {}'.format(attached_title))
+    fig.tight_layout()
+    plt.legend(handles=patches, loc='lower left', **kwargs)
+    plt.grid(linestyle='--', alpha=0.5, color='grey')
+    plt.savefig(RES_FIG_PATH+'performance_vs_sparsity{}.pdf'.format(append_to_fname))
+    plt.close(fig)
+
+
+def plot_em_quant(sparsity_data: dict, attached_title='', normalize_score=False, append_to_fname='', **kwargs):
+    # plot em vs. quant
+    fig, ax = plt.subplots(figsize=(7, 5))
+    plt.xticks(fontsize=15)
+    patches = []
+    ax.set_xlabel("#bits", fontsize=15)
+    ax.invert_xaxis()
+    
+    for idx, (data_label, data) in enumerate(sparsity_data.items()):
+        quant_bits = [int(i) for i in data.index]
+        ax.set_ylabel("EM score", fontsize=15)
+        patches.append(mpatches.Patch(color='C{}'.format(idx), label=data_label))
+        scores = data['em']/data['em'].max() if normalize_score else data['em'] * 100
+        ax.plot(quant_bits, scores,
+                color='C{}'.format(idx), marker='s', markersize=4)
+
+    for label in ax.yaxis.get_majorticklabels(): label.set_fontsize(15)
+
+    # ax.set_ylim([30, 90])
+    # fig.suptitle(
+    #     'Accuracy vs. Sparsity {}'.format(attached_title))
+    fig.tight_layout()
+    plt.legend(handles=patches, loc='lower left', **kwargs)
+    plt.grid(linestyle='--', alpha=0.5, color='grey')
+    plt.savefig(RES_FIG_PATH+'performance_vs_quantbits{}.pdf'.format(append_to_fname))
+    plt.close(fig)
+
+
 def quantize_attention(atts: list):
     def uniform_quant(att, base):
         ret_att = np.floor(att / base + 0.5) * base
         return ret_att
 
-    bits = 16
+    bits = 10
     base = 1.0/(2**bits)
     ret = [uniform_quant(att, base) for att in atts]
     return ret
