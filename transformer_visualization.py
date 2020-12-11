@@ -347,7 +347,7 @@ def plot_atten_dist_per_token_compare_heads(data, bin_step, heads_idx, attn_max=
     plt.close(fig)
 
 
-def plot_atten_dist_per_token_compare_models(data_att0, data_att1, bin_step, scale='log', attached_title='', ylim=1.1):
+def plot_atten_dist_per_token_compare_models(data_att0, data_att1, bin_step, scale='log', attached_title='', ylim=0.3):
     """
     plotting the attention histogram per token, stacking all plots together and compare attentions for different models
     accepted data: a list of attention matrices, with each as [layer, head, length, length]
@@ -381,10 +381,10 @@ def plot_atten_dist_per_token_compare_models(data_att0, data_att1, bin_step, sca
             fig = plt.figure()
             curr_ax = fig.add_subplot(111)
             for row in head_att0:
-                curr_ax.plot(attn_bins[:-1], np.cumsum(row), atten_bar_width,
+                curr_ax.plot(attn_bins[:-1], row, atten_bar_width,
                                 color='C0', linewidth=0.5, linestyle='-', alpha=alpha_val)
             for row in head_att1:
-                curr_ax.plot(attn_bins[:-1], np.cumsum(row), atten_bar_width,
+                curr_ax.plot(attn_bins[:-1], row, atten_bar_width,
                                 color='C1', linewidth=0.5, linestyle='-', alpha=alpha_val)
 
             patches = [mpatches.Patch(color='C0', label='original'), mpatches.Patch(color='C1', label='quantized')]

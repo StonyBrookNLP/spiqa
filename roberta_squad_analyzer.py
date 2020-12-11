@@ -124,6 +124,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
     # MARK: define head mask here
     head_mask = np.ones(ATT_SIZE[:2])
     head_mask[0][9], head_mask[0][11], head_mask[1][2], head_mask[7][8] = 0, 0, 0, 0
+    head_mask = None
     
     res, pipeline_running_counter, fed_data_len = None, 0, len(fed_data)
     total_elem_count = 0
