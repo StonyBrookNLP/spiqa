@@ -861,4 +861,4 @@ if __name__ == '__main__':
         # quantization
         effective_attens = [atten[:, :, :atten.shape[-1], :] for atten in attens]
         quant_att = tv.quantize_attention(effective_attens)
-        tv.plot_atten_dist_per_token_compare_models(effective_attens, quant_att, 100)
+        tv.plot_atten_dist_per_token_compare_models(effective_attens, quant_att, 100, ylim=1.0)

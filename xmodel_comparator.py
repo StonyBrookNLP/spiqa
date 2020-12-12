@@ -65,6 +65,6 @@ def get_em_quantbits(params_path: str, layer_aggregration='mean', avg_score=Fals
     return sparsity_table.dropna().sort_index(ascending=False)
 
 if __name__ == '__main__':
-    roberta_quant = get_em_quantbits('./quantized_params/roberta-base-squad', avg_score=True)
-    print(roberta_quant)
-    tv.plot_em_quant({'RoBERTa-SQuAD': roberta_quant}, fontsize=15)
+    roberta_quant_linear = get_em_quantbits('./quantized_params/roberta-base-squad-linear', avg_score=True)
+    roberta_quant_log = get_em_quantbits('./quantized_params/roberta-base-squad-log', avg_score=True)
+    tv.plot_em_quant({'RoBERTa-SQuAD-linear': roberta_quant_linear, 'RoBERTa-SQuAD-log': roberta_quant_log}, fontsize=15)

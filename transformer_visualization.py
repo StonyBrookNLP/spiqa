@@ -381,10 +381,10 @@ def plot_atten_dist_per_token_compare_models(data_att0, data_att1, bin_step, sca
             fig = plt.figure()
             curr_ax = fig.add_subplot(111)
             for row in head_att0:
-                curr_ax.plot(attn_bins[:-1], row, atten_bar_width,
+                curr_ax.step(attn_bins[:-1], row, atten_bar_width,
                                 color='C0', linewidth=0.5, linestyle='-', alpha=alpha_val)
             for row in head_att1:
-                curr_ax.plot(attn_bins[:-1], row, atten_bar_width,
+                curr_ax.step(attn_bins[:-1], row, atten_bar_width,
                                 color='C1', linewidth=0.5, linestyle='-', alpha=alpha_val)
 
             patches = [mpatches.Patch(color='C0', label='original'), mpatches.Patch(color='C1', label='quantized')]
@@ -651,9 +651,17 @@ def quantize_attention(atts: list):
         ret_att = np.floor(att / base + 0.5) * base
         return ret_att
 
-    bits = 10
+    def log_quant(att, bits):
+        exp = np.floor(np.log2(att) + 0.5)
+        min_exp = -(2.0**bits-1)
+        clamped_exp = np.copy(exp)
+        clamped_exp[exp < min_exp] = min_exp
+        return np.power(2.0, clamped_exp)
+
+    bits = 16
     base = 1.0/(2**bits)
-    ret = [uniform_quant(att, base) for att in atts]
+    # ret = [uniform_quant(att, base) for att in atts]
+    ret = [log_quant(att, bits) for att in atts]
     return ret
 
 
