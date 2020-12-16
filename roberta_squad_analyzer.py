@@ -510,6 +510,7 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
         # MARK: define head mask here
         head_mask = np.ones(ATT_SIZE[:2])
         head_mask[0][9], head_mask[0][11], head_mask[1][2], head_mask[7][8] = 0, 0, 0, 0
+        head_mask = None
 
         # run the prediction, calculate and store the hist
         for qa_pair in associated_data:
@@ -860,5 +861,13 @@ if __name__ == '__main__':
         em_str = 'EM={:.2f}'.format(em_score*100)
         # quantization
         effective_attens = [atten[:, :, :atten.shape[-1], :] for atten in attens]
-        quant_att = tv.quantize_attention(effective_attens)
-        tv.plot_atten_dist_per_token_compare_models(effective_attens, quant_att, 100, ylim=1.0)
+        quant_att_uni = tv.quantize_attention(effective_attens, 'uniform', 4)
+        quant_att_log = tv.quantize_attention(effective_attens, 'log', 4)
+        quant_att_log_3 = tv.quantize_attention(effective_attens, 'log', 3)
+        quant_att_lut = tv.quantize_attention(effective_attens, 'lut', 3)
+        tv.plot_atten_dist_per_token_compare_models({'original': effective_attens, \
+                                                        # 'log-4bit': quant_att_log, \
+                                                        # 'linear-4bit': quant_att_uni, \
+                                                        # 'log-3bit': quant_att_log_3 \
+                                                        'lut-3bit': quant_att_lut
+                                                    }, 100, ylim=0.6, attached_title='')

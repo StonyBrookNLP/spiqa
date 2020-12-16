@@ -13,6 +13,8 @@ from math import isnan, fsum, log, ceil, floor
 from itertools import compress, product
 
 RES_FIG_PATH = "./res_fig/"
+NUM_LAYERS = 12
+NUM_HEADS = 12
 
 
 def get_bin_edges(bin_step, hist_x_start, hist_x_end, scale):
@@ -347,7 +349,7 @@ def plot_atten_dist_per_token_compare_heads(data, bin_step, heads_idx, attn_max=
     plt.close(fig)
 
 
-def plot_atten_dist_per_token_compare_models(data_att0, data_att1, bin_step, scale='log', attached_title='', ylim=0.3):
+def plot_atten_dist_per_token_compare_models(data_att: dict, bin_step, scale='log', attached_title='', ylim=0.3):
     """
     plotting the attention histogram per token, stacking all plots together and compare attentions for different models
     accepted data: a list of attention matrices, with each as [layer, head, length, length]
@@ -357,9 +359,9 @@ def plot_atten_dist_per_token_compare_models(data_att0, data_att1, bin_step, sca
     if scale == 'linear':
         offset = 0.0
 
-    attn_bins, attn_hists = get_bin_edges(bin_step, hist_x_start, hist_x_end, scale), []
+    attn_bins, attn_hists = get_bin_edges(bin_step, hist_x_start, hist_x_end, scale), {}
 
-    for data in [data_att0, data_att1]:
+    for att_idx, data in data_att.items():
         single_attn_hist = None
         for inst in data:
             inst_attn_hist = np.apply_along_axis(
@@ -369,25 +371,22 @@ def plot_atten_dist_per_token_compare_models(data_att0, data_att1, bin_step, sca
                 np.concatenate([single_attn_hist, inst_attn_hist], axis=-2)
 
         # Normalization
-        attn_hists.append(np.apply_along_axis(lambda a: a / np.sum(a), -1, single_attn_hist))
+        attn_hists[att_idx] = np.apply_along_axis(lambda a: a / np.sum(a), -1, single_attn_hist)
 
-    print(attn_hists[0].shape)
     atten_bar_width = [attn_bins[i] - attn_bins[i-1] for i in range(1, len(attn_bins))]
-    
     alpha_val = 0.01
     
-    for layer_idx, (layer_att0, layer_att1) in enumerate(zip(*attn_hists)):
-        for head_idx, (head_att0, head_att1) in enumerate(zip(layer_att0, layer_att1)):
+    for layer_idx in range(NUM_LAYERS):
+        for head_idx in range(NUM_HEADS):
             fig = plt.figure()
             curr_ax = fig.add_subplot(111)
-            for row in head_att0:
-                curr_ax.step(attn_bins[:-1], row, atten_bar_width,
-                                color='C0', linewidth=0.5, linestyle='-', alpha=alpha_val)
-            for row in head_att1:
-                curr_ax.step(attn_bins[:-1], row, atten_bar_width,
-                                color='C1', linewidth=0.5, linestyle='-', alpha=alpha_val)
-
-            patches = [mpatches.Patch(color='C0', label='original'), mpatches.Patch(color='C1', label='quantized')]
+            patches = []
+            for mod_idx, model in enumerate(attn_hists.keys()):
+                patches.append(mpatches.Patch(color='C{}'.format(mod_idx), label=model))
+                for row in attn_hists[model][layer_idx][head_idx]:
+                    curr_ax.bar(attn_bins[:-1], row, atten_bar_width,
+                                    color='C{}'.format(mod_idx), linewidth=0.5, linestyle='-', alpha=alpha_val)
+                    
 
             curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
             curr_ax.set_xscale(scale)
@@ -646,8 +645,9 @@ def plot_em_quant(sparsity_data: dict, attached_title='', normalize_score=False,
     plt.close(fig)
 
 
-def quantize_attention(atts: list):
-    def uniform_quant(att, base):
+def quantize_attention(atts: list, method: str, bits: int):
+    def uniform_quant(att, bits):
+        base = 1.0/(2**bits)
         ret_att = np.floor(att / base + 0.5) * base
         return ret_att
 
@@ -658,10 +658,19 @@ def quantize_attention(atts: list):
         clamped_exp[exp < min_exp] = min_exp
         return np.power(2.0, clamped_exp)
 
-    bits = 16
-    base = 1.0/(2**bits)
-    # ret = [uniform_quant(att, base) for att in atts]
-    ret = [log_quant(att, bits) for att in atts]
+    def lut_quant(att, bits):
+        lut = list(range(-14, 2, 2))
+        exp = np.log2(att)
+        clamped_exp = np.copy(exp)
+        clamped_exp[exp < lut[0]] = lut[0]
+        exp = exp + 1
+        for log_flr, log_ceil in zip(lut, lut[1:] + [2]):
+            clamped_exp[(exp >= log_flr) & (exp < log_ceil)] = log_flr
+        
+        return np.power(2.0, clamped_exp)
+
+    quant_method = {'uniform': uniform_quant, 'log': log_quant, 'lut': lut_quant}
+    ret = [quant_method[method](att, bits) for att in atts]
     return ret
 
 
