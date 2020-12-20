@@ -635,7 +635,7 @@ def plot_em_quant(sparsity_data: dict, attached_title='', normalize_score=False,
 
     for label in ax.yaxis.get_majorticklabels(): label.set_fontsize(15)
 
-    # ax.set_ylim([30, 90])
+    # ax.set_ylim([70, 90])
     # fig.suptitle(
     #     'Accuracy vs. Sparsity {}'.format(attached_title))
     fig.tight_layout()
@@ -655,7 +655,7 @@ def quantize_attention(atts: list, method: str, bits: int):
         exp = np.floor(np.log2(att) + 0.5)
         min_exp = -(2.0**bits-1)
         clamped_exp = np.copy(exp)
-        clamped_exp[exp < min_exp] = min_exp
+        clamped_exp[exp <= min_exp] = float("-inf")
         return np.power(2.0, clamped_exp)
 
     def lut_quant(att, bits):

@@ -67,4 +67,7 @@ def get_em_quantbits(params_path: str, layer_aggregration='mean', avg_score=Fals
 if __name__ == '__main__':
     roberta_quant_linear = get_em_quantbits('./quantized_params/roberta-base-squad-linear', avg_score=True)
     roberta_quant_log = get_em_quantbits('./quantized_params/roberta-base-squad-log', avg_score=True)
-    tv.plot_em_quant({'RoBERTa-SQuAD-linear': roberta_quant_linear, 'RoBERTa-SQuAD-log': roberta_quant_log}, fontsize=15)
+    roberta_quant_lut = get_em_quantbits('./quantized_params/roberta-base-squad-lut', avg_score=True)
+    roberta_quant_log_zres = get_em_quantbits('./quantized_params/roberta-base-squad-logzres', avg_score=True)
+    tv.plot_em_quant({'RoBERTa-SQuAD-linear': roberta_quant_linear, 'RoBERTa-SQuAD-log': roberta_quant_log, \
+                        'RoBERTa-SQuAD-lut': roberta_quant_lut,  'RoBERTa-SQuAD-log-zres': roberta_quant_log_zres}, fontsize=15)

@@ -866,8 +866,8 @@ if __name__ == '__main__':
         quant_att_log_3 = tv.quantize_attention(effective_attens, 'log', 3)
         quant_att_lut = tv.quantize_attention(effective_attens, 'lut', 3)
         tv.plot_atten_dist_per_token_compare_models({'original': effective_attens, \
-                                                        # 'log-4bit': quant_att_log, \
+                                                        'log-4bit': quant_att_log, \
                                                         # 'linear-4bit': quant_att_uni, \
-                                                        # 'log-3bit': quant_att_log_3 \
-                                                        'lut-3bit': quant_att_lut
+                                                        'log-3bit': quant_att_log_3 \
+                                                        # 'lut-3bit': quant_att_lut
                                                     }, 100, ylim=0.6, attached_title='')
