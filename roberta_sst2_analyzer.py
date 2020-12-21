@@ -22,6 +22,10 @@ def extract_sst2(model_name, num_sentences):
     labels = []
     #Taking 50 instances from the SST2 dataset
     selected_data_id = np.random.choice(sst2.num_rows, num_sentences, replace=False)
+    if num_sentences == -1:
+        print("extracting all {} samples...".format(sst2.num_rows))
+        selected_data_id = list(range(sst2.num_rows))
+        
     for d in selected_data_id.tolist():
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         tokenized_se = tokenizer(sst2[d]['sentence'], return_tensors='np')['input_ids']
