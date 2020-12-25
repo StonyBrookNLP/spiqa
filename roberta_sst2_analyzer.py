@@ -20,13 +20,14 @@ def extract_sst2(model_name, num_sentences):
     sst2 = load_dataset("glue", "sst2", cache_dir='./data')['validation']
     sentences = []
     labels = []
-    #Taking 50 instances from the SST2 dataset
-    selected_data_id = np.random.choice(sst2.num_rows, num_sentences, replace=False)
-    if num_sentences == -1:
+    #Taking some instances from the SST2 dataset
+    if num_sentences < 0:
         print("extracting all {} samples...".format(sst2.num_rows))
         selected_data_id = list(range(sst2.num_rows))
-        
-    for d in selected_data_id.tolist():
+    else:    
+        selected_data_id = np.random.choice(sst2.num_rows, num_sentences, replace=False).tolist()
+    
+    for d in selected_data_id:
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         tokenized_se = tokenizer(sst2[d]['sentence'], return_tensors='np')['input_ids']
         if (tokenized_se.shape[-1] < tokenizer.max_len) :
