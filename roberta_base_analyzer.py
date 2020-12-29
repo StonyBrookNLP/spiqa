@@ -424,7 +424,8 @@ def list_sparse_tokens_all(model_name, sparsity_bar=0.0, num_sentences=500):
 
 
 if __name__ == "__main__":
-    model_name = 'bert-base-uncased'
+    model_name = 'roberta-base'
+    # model_name = 'bert-base-uncased'
     arg_parser = ag.ArgumentParser(description=__doc__)
     arg_parser.add_argument("-at", "--att_threshold", default=0.0,
                             required=False, help="set attention sparsity threshold")

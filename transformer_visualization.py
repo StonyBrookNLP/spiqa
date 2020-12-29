@@ -520,6 +520,52 @@ def plot_atten_dist_per_token_with_names(atten_hists, token_names, offset, head_
     plt.close(fig)
 
 
+def plot_pipeline_features(data: list, attached_title=''):
+    dat_squeezed_to_heads = [i.reshape((i.shape[0]*i.shape[1], i.shape[2]*i.shape[3])) for i in data]
+    dat_squeezed_to_heads = np.concatenate(dat_squeezed_to_heads, axis=-1)
+    maxs, mins = np.amax(dat_squeezed_to_heads, axis=-1), np.amin(dat_squeezed_to_heads, axis=-1)
+    means, stds = np.mean(dat_squeezed_to_heads, axis=-1), np.std(dat_squeezed_to_heads, axis=-1)
+
+    fig, ax = plt.subplots(1, 1, figsize=(24, 4))
+    indices = list(range(144))
+    ax.tick_params(axis='x', rotation=60)
+    ax.errorbar(indices, means, yerr=[means - mins, maxs - means],
+                   fmt='.', ecolor='black', capsize=3, lw=1)
+    ax.errorbar(indices, means, yerr=stds, ecolor='black', fmt='ok', lw=3)
+    ax.grid(linestyle='--', color='grey', alpha=0.4)
+    ax.set_xticks(indices)
+    ax.set_xlim((-1, 145))
+    ax.set_title(attached_title)
+    fig.tight_layout()
+    plt.savefig(
+        RES_FIG_PATH+'pipeline_probe_{}.pdf'.format(attached_title))
+    plt.clf()
+    plt.close(fig)
+
+
+def plot_hstate_features(data: list, attached_title=''):
+    dat_squeezed_to_layers = [i.reshape((i.shape[0], i.shape[1]*i.shape[2])) for i in data]
+    dat_squeezed_to_layers = np.concatenate(dat_squeezed_to_layers, axis=-1)
+    maxs, mins = np.amax(dat_squeezed_to_layers, axis=-1), np.amin(dat_squeezed_to_layers, axis=-1)
+    means, stds = np.mean(dat_squeezed_to_layers, axis=-1), np.std(dat_squeezed_to_layers, axis=-1)
+
+    fig, ax = plt.subplots(1, 1, figsize=(4, 3))
+    indices = list(range(13))
+    ax.tick_params(axis='x', rotation=60)
+    ax.errorbar(indices, means, yerr=[means - mins, maxs - means],
+                   fmt='.', ecolor='black', capsize=3, lw=1)
+    ax.errorbar(indices, means, yerr=stds, ecolor='black', fmt='ok', lw=3)
+    ax.grid(linestyle='--', color='grey', alpha=0.4)
+    ax.set_xticks(indices)
+    ax.set_xlim((-1, 13))
+    ax.set_title(attached_title)
+    fig.tight_layout()
+    plt.savefig(
+        RES_FIG_PATH+'hstate_probe_{}.pdf'.format(attached_title))
+    plt.clf()
+    plt.close(fig)
+
+
 def plot_dist_diversity(data: dict, attached_title=''):
     """
     """
@@ -617,7 +663,7 @@ def plot_em_sparsity(sparsity_data: dict, second_axis_data={}, attached_title=''
     plt.close(fig)
 
 
-def plot_em_quant(sparsity_data: dict, attached_title='', normalize_score=False, append_to_fname='', **kwargs):
+def plot_em_quant(sparsity_data: dict, attached_title='', normalize_score=False, append_to_fname='', reverse_y=False, percent=True, **kwargs):
     # plot em vs. quant
     fig, ax = plt.subplots(figsize=(7, 5))
     plt.xticks(fontsize=15)
@@ -629,11 +675,13 @@ def plot_em_quant(sparsity_data: dict, attached_title='', normalize_score=False,
         quant_bits = [int(i) for i in data.index]
         ax.set_ylabel("EM score", fontsize=15)
         patches.append(mpatches.Patch(color='C{}'.format(idx), label=data_label))
-        scores = data['em']/data['em'].max() if normalize_score else data['em'] * 100
+        scores = data['em']/data['em'].max() if normalize_score else data['em']
+        if percent: scores = scores * 100
         ax.plot(quant_bits, scores,
                 color='C{}'.format(idx), marker='s', markersize=4)
 
     for label in ax.yaxis.get_majorticklabels(): label.set_fontsize(15)
+    if reverse_y: ax.invert_yaxis()
 
     # ax.set_ylim([70, 90])
     # fig.suptitle(

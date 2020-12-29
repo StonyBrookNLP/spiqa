@@ -75,7 +75,7 @@ def parse_squad_json(squad_ver='v1.1'):
 #         ""
 #     )
 
-def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, sample_inputs=-1, att_threshold=0.0, hs_threshold=0.0, quantize_base=0.0):
+def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, sample_inputs=-1, att_threshold=0.0, hs_threshold=0.0, att_quant_bits=0.0, hstate_quant_bits=0.0):
     '''
     run question answering pipeline. 
     filter inputs: filter out the question-context pairs that have lengths out of 
@@ -133,10 +133,11 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
     for qa_pair in fed_data:
         print("running pipeline iter {}/{}...".format(pipeline_running_counter, fed_data_len))
         prediction = qa_pipeline(
-            {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=MAX_SEQ_LEN, att_threshold=att_threshold, hs_threshold=hs_threshold, head_mask=head_mask, quantize=quantize_base)
+            {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=MAX_SEQ_LEN, att_threshold=att_threshold, hs_threshold=hs_threshold, head_mask=head_mask, quantize_att_bits=att_quant_bits, quantize_hstate_bits=hstate_quant_bits)
         em_score = max(compute_exact(prediction['answer'], gold_ans)
                        for gold_ans in qa_pair['answers'])
         att_array = prediction['attentions']
+        q_prbs, k_prbs, v_prbs, scrs_prbs, att_out_prbs = prediction['pipeline_prbs']
 
         # aggregrate attention and hidden states
         # MARK: I am only getting values that are zero for the sparsity here. No specific sparsity bar.
@@ -147,7 +148,8 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
         if res is None:
             res = {'score': em_score, 'hidden_states': np.zeros(HS_SIZE),
                    'max': agg_func(np.amax), 'min': agg_func(np.amin), 'mean': agg_func(np.mean),
-                   'std': agg_func(np.std), 'sparsity': add_func(get_spars)}
+                   'std': agg_func(np.std), 'sparsity': add_func(get_spars), 
+                   'q': q_prbs, 'k': k_prbs, 'v': v_prbs, 'scrs': scrs_prbs, 'att_out': att_out_prbs}
             res['attentions'] = [] if sample_inputs > 0 else np.zeros(ATT_SIZE)
         else:
             res['score'] = (res['score'] + em_score)
@@ -156,6 +158,11 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
             res['mean'] = np.concatenate((res['mean'], agg_func(np.mean)), axis=0)
             res['std'] = np.concatenate((res['std'], agg_func(np.std)), axis=0)
             res['sparsity'] = np.add(res['sparsity'], add_func(get_spars))
+            res['q'] += q_prbs
+            res['k'] += k_prbs
+            res['v'] += v_prbs
+            res['scrs'] += scrs_prbs
+            res['att_out'] += att_out_prbs
 
         # collect attentions
         if sample_inputs > 0:
@@ -192,7 +199,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
     return res
 
 
-def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True, single_input=True, sample_inputs=-1, layer_aggregration='mean', att_threshold=0.0, hs_threshold = 0.0, quantize_base = 0.0):
+def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True, single_input=True, sample_inputs=-1, layer_aggregration='mean', att_threshold=0.0, hs_threshold = 0.0, att_quant_bits = 0.0, hstate_quant_bits = 0.0):
     '''
     get the hidden state and attention from pipeline result. 
     The model_name should be a valid Huggingface transformer model. 
@@ -206,20 +213,21 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
     sample inputs is -1 means using all inputs
     '''
     all_hidden_states, all_attentions, total_score, qa_pair_count, \
-        all_max, all_min, all_mean, all_std, all_sparsity = \
-        None, None, None, None, None, None, None, None, None
+        all_max, all_min, all_mean, all_std, all_sparsity, q, k, v, scrs, att_out = \
+        None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
     if sample_inputs > 100 or sample_inputs == 0:
         raise ValueError("the sample inputs should be (0, 100]")
     # read from file
     input_type = "_sampled" if sample_inputs > 0 else "_all"
     input_type += "_filtered" if filter_inputs else ""
-    h_states_path, atten_path, score_path, att_stat_path = \
+    h_states_path, atten_path, score_path, att_stat_path, q_path, k_path, v_path, scrs_path, att_out_path = \
         (PARAM_PATH + i + input_type +
-         '.npy' for i in ['hidden_states', 'attentions', 'score', 'att_stat_features'])
+         '.npy' for i in ['hidden_states', 'attentions', 'score', 'att_stat_features', 'q', 'k', 'v', 'scrs', 'att_out'])
     if os.path.isfile(h_states_path) and os.path.isfile(atten_path) and \
             os.path.isfile(score_path) and os.path.isfile(att_stat_path) and not force_reinfer:
         print("Loading parameters from file {}...".format(PARAM_PATH + input_type))
+        atten_len, q, k, v, scrs, att_out = 0, [], [], [], [], []
         with open(score_path, "rb") as score_file:
             total_score, qa_pair_count = (i for i in np.load(score_file))
         with open(h_states_path, "rb") as h_states_file:
@@ -235,18 +243,31 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
             all_mean = np.load(att_stat_file)
             all_std = np.load(att_stat_file)
             all_sparsity = np.load(att_stat_file)
+        with open(q_path, 'rb') as q_file: 
+            for i in range(atten_len): q.append(np.load(q_file))
+        with open(k_path, 'rb') as k_file: 
+            for i in range(atten_len): k.append(np.load(k_file))
+        with open(v_path, 'rb') as v_file: 
+            for i in range(atten_len): v.append(np.load(v_file))
+        with open(scrs_path, 'rb') as scrs_file: 
+            for i in range(atten_len): scrs.append(np.load(scrs_file))
+        with open(att_out_path, 'rb') as att_out_file: 
+            for i in range(atten_len): att_out.append(np.load(att_out_file))
+            
     # extract parameters from model
     else:
         print("Extracting attentions from model...")
         predictions = run_qa_pipeline(
             model_name, filter_inputs=filter_inputs, single_input=single_input, \
-            sample_inputs=sample_inputs, att_threshold=att_threshold, hs_threshold=hs_threshold, quantize_base=quantize_base)
+            sample_inputs=sample_inputs, att_threshold=att_threshold, hs_threshold=hs_threshold, \
+            att_quant_bits=att_quant_bits, hstate_quant_bits=hstate_quant_bits)
 
         total_score, all_hidden_states, all_attentions, qa_pair_count, \
-            all_max, all_min, all_mean, all_std, all_sparsity = \
+            all_max, all_min, all_mean, all_std, all_sparsity, q, k, v, scrs, att_out = \
             predictions['score'], predictions['hidden_states'], \
             predictions['attentions'], predictions['qa_pair_len'], \
-            predictions['max'], predictions['min'], predictions['mean'], predictions['std'], predictions['sparsity']
+            predictions['max'], predictions['min'], predictions['mean'], predictions['std'], predictions['sparsity'], \
+            predictions['q'], predictions['k'], predictions['v'], predictions['scrs'], predictions['att_out']
 
         with open(score_path, "wb+") as scores_file:
             np.save(scores_file, np.array([total_score, qa_pair_count]))
@@ -263,6 +284,16 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
             np.save(att_stat_file, all_mean)
             np.save(att_stat_file, all_std)
             np.save(att_stat_file, all_sparsity)
+        with open(q_path, 'wb+') as q_file: 
+            for i in q: np.save(q_file, i)
+        with open(k_path, 'wb+') as k_file: 
+            for i in k: np.save(k_file, i)
+        with open(v_path, 'wb+') as v_file: 
+            for i in v: np.save(v_file, i)
+        with open(scrs_path, 'wb+') as scrs_file: 
+            for i in scrs: np.save(scrs_file, i)
+        with open(att_out_path, 'wb+') as att_out_file:
+            for i in att_out: np.save(att_out_file, i)
 
     print("total score: ", total_score, "#QA pair: ", qa_pair_count,
           "hidden_state dim: ", all_hidden_states.shape,
@@ -280,7 +311,7 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
         all_hidden_states /= float(qa_pair_count)
         all_attentions /= float(qa_pair_count)
 
-    return total_score, all_hidden_states, all_attentions, all_max, all_min, all_mean, all_std, all_sparsity
+    return total_score, all_hidden_states, all_attentions, all_max, all_min, all_mean, all_std, all_sparsity, q, k, v, scrs, att_out
 
 
 def get_sparsities(params_path: str, sparsity_bar=0.025, layer_aggregration='mean', avg_score=False):
@@ -751,7 +782,7 @@ def plot_stat_features(stat_features, features_to_plot=['max', 'min', 'std']):
 
 
 if __name__ == '__main__':
-    model_name = 'csarron/bert-base-uncased-squad-v1'
+    model_name = 'csarron/roberta-base-squad-v1'
 
     arg_parser = ag.ArgumentParser(description=__doc__)
     arg_parser.add_argument("-at", "--att_threshold", default=0.0,
@@ -774,25 +805,28 @@ if __name__ == '__main__':
                             required=False, help='print hidden states histogram without saving aggregrated params')
     arg_parser.add_argument("-sa", "--samples", default=-1,
                             required=False, help="number of samples for distribution")
-    arg_parser.add_argument("-qb", "--quantize_base", default=0.0,
-                            required=False, help="base for quantization")
+    arg_parser.add_argument("-aq", "--att_quant_bits", default=0.0,
+                            required=False, help="base for attention quantization")
+    arg_parser.add_argument("-hq", "--hstate_quant_bits", default=0.0,
+                            required=False, help="base for hidden states quantization")
 
     args = vars(arg_parser.parse_args())
     att_threshold = float(args['att_threshold'])
     hs_threshold = float(args['hs_threshold'])
-    quant_base = float(args['quantize_base'])
+    att_quant_bits = float(args['att_quant_bits'])
+    hstate_quant_bits = float(args['hstate_quant_bits'])
     samples = int(args['samples'])
 
     if args['evaluation']:
         em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \
             get_hstates_attens(model_name, filter_inputs=False, force_reinfer=False,
-                               single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples, quantize_base=quant_base)
+                               single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples, att_quant_bits=att_quant_bits, hstate_quant_bits=hstate_quant_bits)
         em_str = 'EM={:.2f}'.format(em_score*100)
 
     if args['distribution']:
-        em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \
-            get_hstates_attens(model_name, filter_inputs=False, force_reinfer=False,
-                               single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples, quantize_base=quant_base)
+        em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity, q, k, v, scrs, att_out = \
+            get_hstates_attens(model_name, filter_inputs=False, force_reinfer=True,
+                               single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples, att_quant_bits=att_quant_bits, hstate_quant_bits=hstate_quant_bits)
         em_str = 'EM={:.2f}'.format(em_score*100)
         stat_features = get_stat_features(
             {'max': att_max, 'min': att_min, 'mean': att_mean, 'std': att_std})
@@ -801,8 +835,8 @@ if __name__ == '__main__':
         stat_features.to_csv('stat_features_unfiltered.csv', sep=',')
 
         # plot histogram for all layers and all heads
-        plot_dist(attens, bin_step=100, sparsity_bar=0.0005,
-                  layer_aggregration='None', attached_title=em_str)
+        # plot_dist(attens, bin_step=100, sparsity_bar=0.0005,
+        #           layer_aggregration='None', attached_title=em_str)
         # # plot histogram for a certain head in a certain layer
         # plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
         #           single_head_idx=(0, 0), attached_title=em_str)
@@ -810,6 +844,16 @@ if __name__ == '__main__':
         #           single_head_idx=(0, 9), attached_title=em_str)
         # plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
         #           single_head_idx=(0, 11), attached_title=em_str)
+
+        # tv.plot_pipeline_features(q, 'q_out')
+        # tv.plot_pipeline_features(k, 'k_out')
+        # tv.plot_pipeline_features(v, 'v_out')
+        # tv.plot_pipeline_features(scrs, 'scrs_out')
+        # tv.plot_pipeline_features(att_out, 'att_out')
+
+        effective_seq_len = [i.shape[-1] for i in attens]
+        effective_h_states = [np.squeeze(h_states[:, i, :effective_seq_len[i], :]) for i in range(h_states.shape[1])]
+        tv.plot_hstate_features(effective_h_states, attached_title='quant')
 
         # only plot heatmaps when distribution is available, temperarily broken
         if args['heatmap']:

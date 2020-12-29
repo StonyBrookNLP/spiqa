@@ -65,9 +65,37 @@ def get_em_quantbits(params_path: str, layer_aggregration='mean', avg_score=Fals
     return sparsity_table.dropna().sort_index(ascending=False)
 
 if __name__ == '__main__':
-    roberta_quant_linear = get_em_quantbits('./quantized_params/roberta-base-squad-linear', avg_score=True)
-    roberta_quant_log = get_em_quantbits('./quantized_params/roberta-base-squad-log', avg_score=True)
-    roberta_quant_lut = get_em_quantbits('./quantized_params/roberta-base-squad-lut', avg_score=True)
-    roberta_quant_log_zres = get_em_quantbits('./quantized_params/roberta-base-squad-logzres', avg_score=True)
-    tv.plot_em_quant({'RoBERTa-SQuAD-linear': roberta_quant_linear, 'RoBERTa-SQuAD-log': roberta_quant_log, \
-                        'RoBERTa-SQuAD-lut': roberta_quant_lut,  'RoBERTa-SQuAD-log-zres': roberta_quant_log_zres}, fontsize=15)
+    #roberta_squad
+    roberta_squad_quant_linear = get_em_quantbits('./quantized_params/roberta-base-squad-linear', avg_score=True)
+    roberta_squad_quant_log = get_em_quantbits('./quantized_params/roberta-base-squad-log', avg_score=True)
+    roberta_squad_quant_lut = get_em_quantbits('./quantized_params/roberta-base-squad-lut', avg_score=True)
+    roberta_squad_quant_log_zres = get_em_quantbits('./quantized_params/roberta-base-squad-logzres', avg_score=True)
+    roberta_squad_quant_linear = get_em_quantbits('./quantized_params/roberta-base-squad-linear', avg_score=True)
+    #bert_squad
+    bert_squad_quant_linear = get_em_quantbits('./quantized_params/bert-squad-quant-linear', avg_score=True)
+    bert_squad_quant_log_zres = get_em_quantbits('./quantized_params/bert-squad-quant-log-zres', avg_score=True)
+    bert_squad_quant_lut = get_em_quantbits('./quantized_params/bert-squad-quant-lut', avg_score=True)
+    #roberta_mlm
+    roberta_mlm_quant_linear = get_em_quantbits('./quantized_params/roberta-mlm-quant-linear')
+    roberta_mlm_quant_log_zres = get_em_quantbits('./quantized_params/roberta-mlm-quant-log-zres')
+    roberta_mlm_quant_lut = get_em_quantbits('./quantized_params/roberta-mlm-quant-lut')
+    #bert_mlm
+    bert_mlm_quant_linear = get_em_quantbits('./quantized_params/bert-mlm-quant-linear')
+    bert_mlm_quant_log_zres = get_em_quantbits('./quantized_params/bert-mlm-quant-log-zres')
+    bert_mlm_quant_lut = get_em_quantbits('./quantized_params/bert-mlm-quant-lut')
+    #sst2
+    roberta_sst2_linear = get_em_quantbits('./quantized_params/roberta-sst2-quant-linear')
+    roberta_sst2_log_zres = get_em_quantbits('./quantized_params/roberta-sst2-quant-log-zres')
+    roberta_sst2_lut = get_em_quantbits('./quantized_params/roberta-sst2-quant-lut')
+
+    tv.plot_em_quant({'RoBERTa-linear': roberta_squad_quant_linear, 'RoBERTa-lut': roberta_squad_quant_lut, \
+                        'RoBERTa-log-zres': roberta_squad_quant_log_zres, 'BERT-linear': bert_squad_quant_linear, \
+                        'BERT-log-zres': bert_squad_quant_log_zres, 'BERT-lut': bert_squad_quant_lut}, append_to_fname='_squad', fontsize=15)
+
+    tv.plot_em_quant({'RoBERTa-linear': roberta_mlm_quant_linear, 'RoBERTa-lut': roberta_mlm_quant_lut, \
+                        'RoBERTa-log-zres': roberta_mlm_quant_log_zres, \
+                        'BERT-linear': bert_mlm_quant_linear, 'BERT-lut': bert_mlm_quant_lut, \
+                        'BERT-log-zres': bert_mlm_quant_log_zres}, append_to_fname='_mlm', reverse_y=True, percent=False, fontsize=15)
+
+    tv.plot_em_quant({'RoBERTa-linear': roberta_sst2_linear, 'RoBERTa-lut': roberta_sst2_lut, \
+                        'RoBERTa-log-zres': roberta_sst2_log_zres}, append_to_fname='_sst', fontsize=15)
