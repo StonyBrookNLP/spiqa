@@ -88,6 +88,9 @@ if __name__ == '__main__':
     roberta_sst2_log_zres = get_em_quantbits('./quantized_params/roberta-sst2-quant-log-zres')
     roberta_sst2_lut = get_em_quantbits('./quantized_params/roberta-sst2-quant-lut')
 
+    #hstate quantization
+    roberta_squad_hquant_linear = get_em_quantbits('./quantized_params/roberta-squad-hquant-linear', avg_score=True)
+
     tv.plot_em_quant({'RoBERTa-linear': roberta_squad_quant_linear, 'RoBERTa-lut': roberta_squad_quant_lut, \
                         'RoBERTa-log-zres': roberta_squad_quant_log_zres, 'BERT-linear': bert_squad_quant_linear, \
                         'BERT-log-zres': bert_squad_quant_log_zres, 'BERT-lut': bert_squad_quant_lut}, append_to_fname='_squad', fontsize=15)
@@ -99,3 +102,5 @@ if __name__ == '__main__':
 
     tv.plot_em_quant({'RoBERTa-linear': roberta_sst2_linear, 'RoBERTa-lut': roberta_sst2_lut, \
                         'RoBERTa-log-zres': roberta_sst2_log_zres}, append_to_fname='_sst', fontsize=15)
+
+    tv.plot_em_quant({'RoBERTa-linear': roberta_squad_hquant_linear}, append_to_fname='_h_squad', fontsize=15)

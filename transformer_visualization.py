@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import matplotlib.patches as mpatches
 import matplotlib.gridspec as gridspec
+from tqdm import tqdm
 from textwrap import wrap
 from math import isnan, fsum, log, ceil, floor
 from itertools import compress, product
@@ -432,17 +433,19 @@ def plot_hs_dist_per_token(data, bin_step, attn_mask, scale='log', attached_titl
     matplotlib.rcParams.update({'font.size': 12})
     matplotlib.rcParams.update({'xtick.labelsize': 13})
     matplotlib.rcParams.update({'ytick.labelsize': 13})
-    for layer_idx, layer in enumerate(hs_hists[1:, :, :, :]):
+    for layer_idx, layer in tqdm(enumerate(hs_hists[1:, :, :, :])):
         curr_ax = ax[int(layer_idx / 4), int(layer_idx % 4)]
         curr_ax2 = curr_ax.twinx()
         alpha_val = 0.01
         for mask, inst in zip(attn_mask, layer):
             for row_idx, row in enumerate(inst):
-                color_id = 0 if row_idx < mask else 5
-                curr_ax.plot(hs_bins[:-1], row, 
-                        color='C{}'.format(color_id), linewidth=0.5, linestyle='-', alpha=alpha_val)
-                curr_ax2.plot(hs_bins[:-1], np.cumsum(row),
-                        color='C{}'.format(color_id+3), linewidth=0.5, linestyle='-', alpha=alpha_val)
+                # color_id = 0 if row_idx < mask else 5
+                if row_idx < mask:
+                    color_id = 0
+                    curr_ax.bar(hs_bins[:-1], row, 
+                            color='C{}'.format(color_id), linewidth=0.5, linestyle='-', alpha=alpha_val)
+                    curr_ax2.bar(hs_bins[:-1], np.cumsum(row),
+                            color='C{}'.format(color_id+3), linewidth=0.5, linestyle='-', alpha=alpha_val)
 
         subplot_title = 'layer_{}, max: {:.4f}, min: {:.4f}, \n#elem<left: {:.4f}, #elem>right: {:.4f}'.format(
             layer_idx, hs_max[layer_idx], hs_min[layer_idx], \
@@ -464,12 +467,13 @@ def plot_hs_dist_per_token(data, bin_step, attn_mask, scale='log', attached_titl
     
     fig.suptitle("Histogram for Hidden States per layer (per token){}".format(attached_title), fontsize=21, y=0.99)
     patches = [mpatches.Patch(color='C0', label='pdf of tokens within actual size'), 
-                mpatches.Patch(color='C3', label='cdf of tokens within actual size'), 
-                mpatches.Patch(color='C5', label='pdf of padded tokens'),
-                mpatches.Patch(color='C8', label='cdf of padded tokens')]
+                mpatches.Patch(color='C3', label='cdf of tokens within actual size')
+                # mpatches.Patch(color='C5', label='pdf of padded tokens'),
+                # mpatches.Patch(color='C8', label='cdf of padded tokens')
+                ]
     fig.legend(handles=patches, loc='upper center', ncol=4, bbox_to_anchor=(0.5, 0.97))
     fig.tight_layout(pad=2.2)
-    plt.savefig(RES_FIG_PATH+'hs_hist_per_token.png', dpi=600)
+    plt.savefig(RES_FIG_PATH+'hs_hist_per_token.png', dpi=160)
     plt.clf()
     plt.close(fig)
 

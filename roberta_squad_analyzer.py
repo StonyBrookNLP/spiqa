@@ -186,7 +186,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
 
         if (sample_inputs > 0): 
             for i in res['attentions']: 
-                if (i > len(res['attentions'])).any() :
+                if (i > len(res['attentions'])).any():
                     idx0, idx1, idx2, idx3, idx4 = np.where(i > len(res['attentions']))
                     print("iter {} has attention larger than 1 ({}), exist..."
                         .format(len(res['attentions']), (idx0[0], idx1[0], idx2[0], idx3[0], idx4[0])))
@@ -818,7 +818,7 @@ if __name__ == '__main__':
     samples = int(args['samples'])
 
     if args['evaluation']:
-        em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \
+        em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity, _, _, _, _, _ = \
             get_hstates_attens(model_name, filter_inputs=False, force_reinfer=False,
                                single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples, att_quant_bits=att_quant_bits, hstate_quant_bits=hstate_quant_bits)
         em_str = 'EM={:.2f}'.format(em_score*100)
@@ -888,7 +888,7 @@ if __name__ == '__main__':
         plot_dist_token_dynamic(model_name, 100, sparsity_bar=0.0, att_threshold=att_threshold, samples=samples, scale='log', attached_title='(per_token)')
 
     if args['hidden_states']:
-        em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \
+        em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity, _, _, _, _, _ = \
             get_hstates_attens(model_name, filter_inputs=False, force_reinfer=False,
                                single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples)
         attn_mask = [i.shape[-1] for i in attens]
