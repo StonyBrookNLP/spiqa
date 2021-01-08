@@ -422,7 +422,7 @@ def plot_hs_dist_per_token(data, bin_step, attn_mask, scale='log', attached_titl
 
     hs_max, hs_min = np.amax(data[1:, :, :, :], axis=(-3, -2, -1)), np.amin(data[1:, :, :, :], axis=(-3, -2, -1))
     # hist_x_start, hist_x_end = float(floor(np.amin(data))), float(ceil(np.amax(data)))
-    hist_x_start, hist_x_end = -2.5, 2.5
+    hist_x_start, hist_x_end = -5, 5
     hs_bins, hs_hists = get_bin_edges(bin_step, hist_x_start, hist_x_end, scale), None
     hs_hists = np.apply_along_axis(
                 lambda x: np.histogram(x, bins=hs_bins, weights=(np.ones_like(x) / len(x)))[0], -1, data)
@@ -444,7 +444,7 @@ def plot_hs_dist_per_token(data, bin_step, attn_mask, scale='log', attached_titl
                     color_id = 0
                     curr_ax.bar(hs_bins[:-1], row, 
                             color='C{}'.format(color_id), linewidth=0.5, linestyle='-', alpha=alpha_val)
-                    curr_ax2.bar(hs_bins[:-1], np.cumsum(row),
+                    curr_ax2.plot(hs_bins[:-1], np.cumsum(row),
                             color='C{}'.format(color_id+3), linewidth=0.5, linestyle='-', alpha=alpha_val)
 
         subplot_title = 'layer_{}, max: {:.4f}, min: {:.4f}, \n#elem<left: {:.4f}, #elem>right: {:.4f}'.format(
@@ -453,15 +453,19 @@ def plot_hs_dist_per_token(data, bin_step, attn_mask, scale='log', attached_titl
             np.count_nonzero(data[layer_idx+1] > hist_x_end) / float(10*320*768))
         curr_ax.set_title('\n'.join(wrap(subplot_title, 42)))
         curr_ax.grid(linestyle='--', color='grey', alpha=0.6)
-        curr_ax.set_xscale(scale)
+        if scale == 'log':
+            curr_ax.set_xscale(scale, basex=2)
+        else:
+            curr_ax.set_xscale(scale)
+
         # curr_ax.set_yscale('log')
         curr_ax.set_yticks(np.linspace(0, ylim[0], 11))
         curr_ax2.set_yticks(np.linspace(0, ylim[1], 11))
         curr_ax.set_ylim((0, ylim[0]))
         curr_ax2.set_ylim((0, ylim[1]))
         if scale == 'log':
-            curr_ax.set_xlim([10 ** hist_x_start - 10 ** (hist_x_start-1),
-                              10 ** hist_x_end])
+            curr_ax.set_xlim([2 ** hist_x_start - 2 ** (hist_x_start-1),
+                              2 ** hist_x_end])
         else:
             curr_ax.set_xlim([hist_x_start, hist_x_end])
     
@@ -726,3 +730,34 @@ def quantize_attention(atts: list, method: str, bits: int):
     return ret
 
 
+def quantize_hstates(hstates, method: str, bits: int):
+    def linear_quant(hstates, bits):
+        effective_range = (0, 25.0 + 15.0)
+        quant_step = (effective_range[1]-effective_range[0]) / 2.0**bits
+        lut = np.arange(effective_range[0], effective_range[1], quant_step)
+        temp_inputs = hstates + 15.0
+        temp_inputs = temp_inputs / quant_step
+        temp_inputs = np.floor(temp_inputs + 0.5) * quant_step
+        temp_inputs = temp_inputs - 15.0
+
+        return temp_inputs
+
+    def log_quant(hstates, bits):
+        # reserve one bit for sign
+        effi_bits = bits - 1
+        frac_ubound, frac_lbound = 4.0, -5.0
+        quant_log_step = (frac_ubound-frac_lbound) / (2.0**effi_bits-1.0)
+
+        signs = np.ones(hstates.shape)
+        signs[hstates < 0.0] = -1.0
+        exp = np.abs(hstates)
+        exp[hstates == 0.0] = 10**-10
+        exp = np.floor(np.log2(exp) / quant_log_step + 0.5) * quant_log_step
+        clamped_exp = exp.copy()
+        clamped_exp[exp <= frac_lbound] = float("-Inf")
+        clamped_exp[exp > frac_ubound] = frac_ubound
+        
+        return np.power(2.0, clamped_exp) * signs
+
+    quant_method = {'linear': linear_quant, 'log': log_quant}
+    return quant_method[method](hstates, bits)

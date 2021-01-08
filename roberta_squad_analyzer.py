@@ -896,7 +896,8 @@ if __name__ == '__main__':
         # for i in range(10):
         #     print("h_state mean:{:.4f}, std:{:.4f}".format(
         #         np.mean(h_states[0][0][i*5], axis=-1), np.std(h_states[0][0][i*5], axis=-1)))
-        tv.plot_hs_dist_per_token(h_states, 100, attn_mask, scale='linear')
+        quant_hstates = tv.quantize_hstates(h_states, 'log', int(hstate_quant_bits))
+        tv.plot_hs_dist_per_token(quant_hstates, 100, attn_mask, scale='linear', ylim=[0.5, 1])
 
     if args['quant_visualize']:
         em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \
