@@ -703,7 +703,7 @@ def plot_em_quant(sparsity_data: dict, attached_title='', normalize_score=False,
 
 def quantize_attention(atts: list, method: str, bits: int):
     def uniform_quant(att, bits):
-        base = 1.0/(2**bits)
+        base = 1.0/(2**bits-1)
         ret_att = np.floor(att / base + 0.5) * base
         return ret_att
 
@@ -726,11 +726,11 @@ def quantize_attention(atts: list, method: str, bits: int):
     #     return np.power(2.0, clamped_exp)
 
     def clamped_log(att, bits):
-        min_exp = -9.9
-        step = min_exp / 2.0**bits
+        min_exp = log2(1e-3)
+        step = min_exp / (2.0**bits - 1)
         exp = np.log2(att)
         clamped_exp = np.floor(exp / step + 0.5) * step
-        clamped_exp[exp < min_exp] = float("-Inf")
+        clamped_exp[exp < (min_exp - step)] = float("-Inf")
         return np.power(2.0, clamped_exp)
 
     def ranking_quant(att, bits):
