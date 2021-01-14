@@ -75,6 +75,7 @@ if __name__ == '__main__':
     bert_squad_quant_linear = get_em_quantbits('./quantized_params/bert-squad-quant-linear', avg_score=True)
     bert_squad_quant_log_zres = get_em_quantbits('./quantized_params/bert-squad-quant-log-zres', avg_score=True)
     bert_squad_quant_lut = get_em_quantbits('./quantized_params/bert-squad-quant-lut', avg_score=True)
+    roberta_squad_quant_clamped_evenlog = get_em_quantbits('./quantized_params/roberta-squad-quant-clamped-evenlog', avg_score=True)
     #roberta_mlm
     roberta_mlm_quant_linear = get_em_quantbits('./quantized_params/roberta-mlm-quant-linear')
     roberta_mlm_quant_log_zres = get_em_quantbits('./quantized_params/roberta-mlm-quant-log-zres')
@@ -90,14 +91,16 @@ if __name__ == '__main__':
 
     #hstate quantization
     roberta_squad_hquant_linear = get_em_quantbits('./quantized_params/roberta-squad-hquant-linear', avg_score=True)
-    roberta_squad_hquant_lut = get_em_quantbits('./quantized_params/roberta-squad-hquant-lut', avg_score=True)
-    roberta_squad_hquant_lutsmax = get_em_quantbits('./quantized_params/roberta-squad-hquant-lutsmax', avg_score=True)
+    roberta_squad_hquant_evenlog = get_em_quantbits('./quantized_params/roberta-squad-hquant-evenlog', avg_score=True)
+    roberta_squad_hquant_evenlog_smax = get_em_quantbits('./quantized_params/roberta-squad-hquant-evenlog-smax', avg_score=True)
     roberta_squad_hquant_fixed5 = get_em_quantbits('./quantized_params/roberta-squad-hquant-fixed5', avg_score=True)
     roberta_squad_hquant_fixed4 = get_em_quantbits('./quantized_params/roberta-squad-hquant-fixed4', avg_score=True)
 
-    tv.plot_em_quant({'RoBERTa-linear': roberta_squad_quant_linear, 'RoBERTa-lut': roberta_squad_quant_lut, \
-                        'RoBERTa-log-zres': roberta_squad_quant_log_zres, 'BERT-linear': bert_squad_quant_linear, \
-                        'BERT-log-zres': bert_squad_quant_log_zres, 'BERT-lut': bert_squad_quant_lut}, append_to_fname='_squad', fontsize=15)
+    tv.plot_em_quant({'RoBERTa-linear': roberta_squad_quant_linear, 'RoBERTa-even-log': roberta_squad_quant_lut, \
+                        # 'BERT-linear': bert_squad_quant_linear, \
+                        'RoBERTa-clamped-even-log': roberta_squad_quant_clamped_evenlog, \
+                        # 'BERT-log-zres': bert_squad_quant_log_zres, 'BERT-lut': bert_squad_quant_lut \
+                        }, append_to_fname='_squad', fontsize=15)
 
     tv.plot_em_quant({'RoBERTa-linear': roberta_mlm_quant_linear, 'RoBERTa-lut': roberta_mlm_quant_lut, \
                         'RoBERTa-log-zres': roberta_mlm_quant_log_zres, \
@@ -107,6 +110,7 @@ if __name__ == '__main__':
     tv.plot_em_quant({'RoBERTa-linear': roberta_sst2_linear, 'RoBERTa-lut': roberta_sst2_lut, \
                         'RoBERTa-log-zres': roberta_sst2_log_zres}, append_to_fname='_sst', fontsize=15)
 
-    tv.plot_em_quant({'RoBERTa-linear-asym': roberta_squad_hquant_linear, 'RoBERTa-lut': roberta_squad_hquant_lut, \
-                         'RoBERTa-lut-smax': roberta_squad_hquant_lutsmax, 'RoBERTa-fixed5': roberta_squad_hquant_fixed5, \
+    tv.plot_em_quant({'RoBERTa-linear-asym': roberta_squad_hquant_linear, 'RoBERTa-even-log': roberta_squad_hquant_evenlog, \
+                         'RoBERTa-even-log-smax': roberta_squad_hquant_evenlog_smax, \
+                         'RoBERTa-fixed5': roberta_squad_hquant_fixed5, \
                          'RoBERTa-fixed4': roberta_squad_hquant_fixed4}, append_to_fname='_h_squad', fontsize=15)

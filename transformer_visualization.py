@@ -714,18 +714,58 @@ def quantize_attention(atts: list, method: str, bits: int):
         clamped_exp[exp <= min_exp] = float("-inf")
         return np.power(2.0, clamped_exp)
 
-    def lut_quant(att, bits):
-        lut = list(range(-14, 2, 2))
-        exp = np.log2(att)
-        clamped_exp = np.copy(exp)
-        clamped_exp[exp < lut[0]] = lut[0]
-        exp = exp + 1
-        for log_flr, log_ceil in zip(lut, lut[1:] + [2]):
-            clamped_exp[(exp >= log_flr) & (exp < log_ceil)] = log_flr
+    # def lut_quant(att, bits):
+    #     lut = list(range(-9.9, 2, 2))
+    #     exp = np.log2(att)
+    #     clamped_exp = np.copy(exp)
+    #     clamped_exp[exp < lut[0]] = lut[0]
+    #     exp = exp + 1
+    #     for log_flr, log_ceil in zip(lut, lut[1:] + [2]):
+    #         clamped_exp[(exp >= log_flr) & (exp < log_ceil)] = log_flr
         
+    #     return np.power(2.0, clamped_exp)
+
+    def clamped_log(att, bits):
+        min_exp = -9.9
+        step = min_exp / 2.0**bits
+        exp = np.log2(att)
+        clamped_exp = np.floor(exp / step + 0.5) * step
+        clamped_exp[exp < min_exp] = float("-Inf")
         return np.power(2.0, clamped_exp)
 
-    quant_method = {'uniform': uniform_quant, 'log': log_quant, 'lut': lut_quant}
+    def ranking_quant(att, bits):
+        min_val = 1e-3
+        def ranking_search(row):
+            num_ranks = int(2.0**bits - 1)
+            thresholds = [1.0 / num_ranks * i for i in range(1, num_ranks)]
+            return [np.argmax(row > threshold) for threshold in thresholds] 
+
+        # get fixed ranking position using numpy
+        hist_x_start, hist_x_end = log(min_val, 10), log(1, 10)
+        bin_edges = 10**np.linspace(hist_x_start, hist_x_end, 100+1)
+        atts_np = np.apply_along_axis(
+                lambda x: np.histogram(x, bin_edges, range=(min_val, 1.0))[0], -1,  att)
+        atts_np = np.cumsum(np.apply_along_axis(lambda a: a / np.sum(a) if np.sum(a) > 0 else a, -1, atts_np), axis=-1)
+        rank_idx = np.apply_along_axis(ranking_search, -1, atts_np)
+        ranking_map = np.apply_along_axis(lambda x: bin_edges[x], -1, rank_idx)
+        value_clamp_to = np.apply_along_axis(lambda x: bin_edges[x-1], -1, rank_idx)
+
+        # fixed ranking position, from histogram observation
+        zero_masks, compare_done_mask = np.ones(att.shape), np.ones(att.shape)
+        zero_masks[att<min_val] = 0.0
+        quant_att = np.zeros(att.shape)
+        for thres, val in zip(np.split(ranking_map, ranking_map.shape[-1], axis=-1), np.split(value_clamp_to, value_clamp_to.shape[-1], axis=-1)):
+            ranking_map_stacked = np.concatenate([thres]*quant_att.shape[-1], axis=-1)
+            val_stacked = np.concatenate([val]*quant_att.shape[-1], axis=-1)
+            quant_att += (att < ranking_map_stacked) * val_stacked * compare_done_mask
+            compare_done_mask = att >= ranking_map_stacked
+
+        quant_att += (att < 1.0) * 1.0 * compare_done_mask
+        quant_att = quant_att * zero_masks
+
+        return quant_att
+
+    quant_method = {'uniform': uniform_quant, 'log': log_quant, 'clamped-log': clamped_log, 'rank': ranking_quant}
     ret = [quant_method[method](att, bits) for att in atts]
     return ret
 

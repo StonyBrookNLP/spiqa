@@ -184,13 +184,13 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
         pipeline_running_counter += 1
         total_elem_count += sum([att.shape[-1] * att.shape[-1] for att in att_array])
 
-        if (sample_inputs > 0): 
-            for i in res['attentions']: 
-                if (i > len(res['attentions'])).any():
-                    idx0, idx1, idx2, idx3, idx4 = np.where(i > len(res['attentions']))
-                    print("iter {} has attention larger than 1 ({}), exist..."
-                        .format(len(res['attentions']), (idx0[0], idx1[0], idx2[0], idx3[0], idx4[0])))
-                    exit()
+        # if (sample_inputs > 0): 
+        #     for i in res['attentions']: 
+        #         if (i > len(res['attentions'])).any():
+        #             idx0, idx1, idx2, idx3, idx4 = np.where(i > len(res['attentions']))
+        #             print("iter {} has attention larger than 1 ({}), exist..."
+        #                 .format(len(res['attentions']), (idx0[0], idx1[0], idx2[0], idx3[0], idx4[0])))
+        #             exit()
 
         print(prediction['answer'], em_score, res['score'] / pipeline_running_counter)
 
@@ -819,7 +819,7 @@ if __name__ == '__main__':
 
     if args['evaluation']:
         em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity, _, _, _, _, _ = \
-            get_hstates_attens(model_name, filter_inputs=False, force_reinfer=False,
+            get_hstates_attens(model_name, filter_inputs=False, force_reinfer=True,
                                single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples, att_quant_bits=att_quant_bits, hstate_quant_bits=hstate_quant_bits)
         em_str = 'EM={:.2f}'.format(em_score*100)
 
@@ -835,8 +835,8 @@ if __name__ == '__main__':
         stat_features.to_csv('stat_features_unfiltered.csv', sep=',')
 
         # plot histogram for all layers and all heads
-        # plot_dist(attens, bin_step=100, sparsity_bar=0.0005,
-        #           layer_aggregration='None', attached_title=em_str)
+        plot_dist(attens, bin_step=100, sparsity_bar=0.0005,
+                  layer_aggregration='None', attached_title=em_str)
         # # plot histogram for a certain head in a certain layer
         # plot_dist(attens, bin_step=200, sparsity_bar=0.0005,
         #           single_head_idx=(0, 0), attached_title=em_str)
@@ -900,19 +900,21 @@ if __name__ == '__main__':
         tv.plot_hs_dist_per_token(quant_hstates, 100, attn_mask, scale='linear', ylim=[0.5, 1])
 
     if args['quant_visualize']:
-        em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity = \
+        em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity, _, _, _, _, _ = \
             get_hstates_attens(model_name, filter_inputs=False, force_reinfer=False,
                                single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples)
         em_str = 'EM={:.2f}'.format(em_score*100)
         # quantization
         effective_attens = [atten[:, :, :atten.shape[-1], :] for atten in attens]
-        quant_att_uni = tv.quantize_attention(effective_attens, 'uniform', 4)
-        quant_att_log = tv.quantize_attention(effective_attens, 'log', 4)
-        quant_att_log_3 = tv.quantize_attention(effective_attens, 'log', 3)
-        quant_att_lut = tv.quantize_attention(effective_attens, 'lut', 3)
+        # quant_att_uni = tv.quantize_attention(effective_attens, 'uniform', 4)
+        # quant_att_log = tv.quantize_attention(effective_attens, 'log', 4)
+        # quant_att_log_3 = tv.quantize_attention(effective_attens, 'log', 3)
+        quant_att_lut = tv.quantize_attention(effective_attens, 'clamped-log', 2)
+        quant_att_rank = tv.quantize_attention(effective_attens, 'rank', 2)
         tv.plot_atten_dist_per_token_compare_models({'original': effective_attens, \
-                                                        'log-4bit': quant_att_log, \
+                                                        # 'log-4bit': quant_att_log, \
                                                         # 'linear-4bit': quant_att_uni, \
-                                                        'log-3bit': quant_att_log_3 \
-                                                        # 'lut-3bit': quant_att_lut
+                                                        # 'log-3bit': quant_att_log_3 \
+                                                        'clamped-2bit': quant_att_lut, \
+                                                        'rank-2bit': quant_att_rank
                                                     }, 100, ylim=0.6, attached_title='')
