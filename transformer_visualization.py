@@ -10,7 +10,7 @@ import matplotlib.patches as mpatches
 import matplotlib.gridspec as gridspec
 from tqdm import tqdm
 from textwrap import wrap
-from math import isnan, fsum, log, ceil, floor
+from math import isnan, fsum, log, log2, ceil, floor
 from itertools import compress, product
 
 RES_FIG_PATH = "./res_fig/"
@@ -350,7 +350,7 @@ def plot_atten_dist_per_token_compare_heads(data, bin_step, heads_idx, attn_max=
     plt.close(fig)
 
 
-def plot_atten_dist_per_token_compare_models(data_att: dict, bin_step, scale='log', attached_title='', ylim=0.3):
+def plot_atten_dist_per_token_compare_models(data_att: dict, bin_step, scale='log', attached_title='', ylim=1.0):
     """
     plotting the attention histogram per token, stacking all plots together and compare attentions for different models
     accepted data: a list of attention matrices, with each as [layer, head, length, length]
@@ -765,7 +765,37 @@ def quantize_attention(atts: list, method: str, bits: int):
 
         return quant_att
 
-    quant_method = {'uniform': uniform_quant, 'log': log_quant, 'clamped-log': clamped_log, 'rank': ranking_quant}
+
+    def ranking_quant_head(att, bits):
+        min_val = 1e-3
+        def ranking_search(row):
+            num_ranks = int(2.0**bits - 1)
+            thresholds = [1.0 / num_ranks * i for i in range(1, num_ranks)]
+            return [np.argmax(row > threshold) for threshold in thresholds] 
+
+        # get fixed ranking position using numpy
+        hist_x_start, hist_x_end = log(min_val, 10), log(1, 10)
+        bin_edges = 10**np.linspace(hist_x_start, hist_x_end, 100+1)
+        atts_np = np.histogram(att.flatten(), bin_edges, range=(min_val, 1.0))[0]
+        atts_np = np.cumsum(atts_np / np.sum(atts_np))
+        rank_idx = ranking_search(atts_np)
+        ranking_map = bin_edges[rank_idx]
+        value_clamp_to = [(start+end)/2.0 for start, end in zip([min_val] + list(ranking_map[:-1]), ranking_map)]
+
+        # fixed ranking position based on histogram
+        zero_masks, compare_done_mask = np.ones(att.shape), np.ones(att.shape)
+        zero_masks[att<min_val] = 0.0
+        quant_att = np.zeros(att.shape)
+        for thres, val in zip(ranking_map, value_clamp_to):
+            quant_att += (att < thres) * val * compare_done_mask
+            compare_done_mask = att >= thres
+
+        quant_att += (att < 1.0) * 1.0 * compare_done_mask
+        quant_att = quant_att * zero_masks
+
+        return quant_att
+
+    quant_method = {'uniform': uniform_quant, 'log': log_quant, 'clamped-log': clamped_log, 'rank': ranking_quant, 'rank_head': ranking_quant_head}
     ret = [quant_method[method](att, bits) for att in atts]
     return ret
 

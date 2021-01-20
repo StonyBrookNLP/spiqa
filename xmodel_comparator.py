@@ -66,14 +66,11 @@ def get_em_quantbits(params_path: str, layer_aggregration='mean', avg_score=Fals
 
 if __name__ == '__main__':
     #roberta_squad
-    roberta_squad_quant_linear = get_em_quantbits('./quantized_params/roberta-base-squad-linear', avg_score=True)
-    roberta_squad_quant_log = get_em_quantbits('./quantized_params/roberta-base-squad-log', avg_score=True)
-    roberta_squad_quant_lut = get_em_quantbits('./quantized_params/roberta-base-squad-lut', avg_score=True)
-    roberta_squad_quant_log_zres = get_em_quantbits('./quantized_params/roberta-base-squad-logzres', avg_score=True)
-    roberta_squad_quant_linear = get_em_quantbits('./quantized_params/roberta-base-squad-linear', avg_score=True)
+    roberta_squad_quant_linear = get_em_quantbits('./quantized_params/roberta-squad-quant-linear', avg_score=True)
     roberta_squad_quant_clamped_log_1e2 = get_em_quantbits('./quantized_params/roberta-squad-quant-clamped-log-1e-2', avg_score=True)
     roberta_squad_quant_clamped_log_1e3 = get_em_quantbits('./quantized_params/roberta-squad-quant-clamped-log-1e-3', avg_score=True)
     roberta_squad_quant_bin = get_em_quantbits('./quantized_params/roberta-squad-quant-bin', avg_score=True)
+    roberta_squad_quant_rank = get_em_quantbits('./quantized_params/roberta-squad-quant-rank', avg_score=True)
     #bert_squad
     bert_squad_quant_linear = get_em_quantbits('./quantized_params/bert-squad-quant-linear', avg_score=True)
     bert_squad_quant_log_zres = get_em_quantbits('./quantized_params/bert-squad-quant-log-zres', avg_score=True)
@@ -98,7 +95,7 @@ if __name__ == '__main__':
     roberta_squad_hquant_fixed5 = get_em_quantbits('./quantized_params/roberta-squad-hquant-fixed5', avg_score=True)
     roberta_squad_hquant_fixed4 = get_em_quantbits('./quantized_params/roberta-squad-hquant-fixed4', avg_score=True)
 
-    tv.plot_em_quant({'RoBERTa-linear': roberta_squad_quant_linear, 'RoBERTa-log': roberta_squad_quant_log_zres, \
+    tv.plot_em_quant({'RoBERTa-linear': roberta_squad_quant_linear, 'RoBERTa-rank': roberta_squad_quant_rank, \
                         # 'BERT-linear': bert_squad_quant_linear, \
                         'RoBERTa-clamped-log(1e-2)': roberta_squad_quant_clamped_log_1e2, \
                         'RoBERTa-clamped-log(1e-3)': roberta_squad_quant_clamped_log_1e3, \

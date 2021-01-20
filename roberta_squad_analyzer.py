@@ -158,11 +158,11 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
             res['mean'] = np.concatenate((res['mean'], agg_func(np.mean)), axis=0)
             res['std'] = np.concatenate((res['std'], agg_func(np.std)), axis=0)
             res['sparsity'] = np.add(res['sparsity'], add_func(get_spars))
-            res['q'] += q_prbs
-            res['k'] += k_prbs
-            res['v'] += v_prbs
-            res['scrs'] += scrs_prbs
-            res['att_out'] += att_out_prbs
+            # res['q'] += q_prbs
+            # res['k'] += k_prbs
+            # res['v'] += v_prbs
+            # res['scrs'] += scrs_prbs
+            # res['att_out'] += att_out_prbs
 
         # collect attentions
         if sample_inputs > 0:
@@ -243,16 +243,16 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
             all_mean = np.load(att_stat_file)
             all_std = np.load(att_stat_file)
             all_sparsity = np.load(att_stat_file)
-        with open(q_path, 'rb') as q_file: 
-            for i in range(atten_len): q.append(np.load(q_file))
-        with open(k_path, 'rb') as k_file: 
-            for i in range(atten_len): k.append(np.load(k_file))
-        with open(v_path, 'rb') as v_file: 
-            for i in range(atten_len): v.append(np.load(v_file))
-        with open(scrs_path, 'rb') as scrs_file: 
-            for i in range(atten_len): scrs.append(np.load(scrs_file))
-        with open(att_out_path, 'rb') as att_out_file: 
-            for i in range(atten_len): att_out.append(np.load(att_out_file))
+        # with open(q_path, 'rb') as q_file: 
+        #     for i in range(atten_len): q.append(np.load(q_file))
+        # with open(k_path, 'rb') as k_file: 
+        #     for i in range(atten_len): k.append(np.load(k_file))
+        # with open(v_path, 'rb') as v_file: 
+        #     for i in range(atten_len): v.append(np.load(v_file))
+        # with open(scrs_path, 'rb') as scrs_file: 
+        #     for i in range(atten_len): scrs.append(np.load(scrs_file))
+        # with open(att_out_path, 'rb') as att_out_file: 
+        #     for i in range(atten_len): att_out.append(np.load(att_out_file))
             
     # extract parameters from model
     else:
@@ -909,12 +909,14 @@ if __name__ == '__main__':
         # quant_att_uni = tv.quantize_attention(effective_attens, 'uniform', 4)
         # quant_att_log = tv.quantize_attention(effective_attens, 'log', 4)
         # quant_att_log_3 = tv.quantize_attention(effective_attens, 'log', 3)
-        quant_att_lut = tv.quantize_attention(effective_attens, 'clamped-log', 2)
-        quant_att_rank = tv.quantize_attention(effective_attens, 'rank', 2)
+        quant_att_lut = tv.quantize_attention(effective_attens, 'clamped-log', 7)
+        quant_att_rank = tv.quantize_attention(effective_attens, 'rank', 7)
+        quant_att_rank_6 = tv.quantize_attention(effective_attens, 'rank', 6)
         tv.plot_atten_dist_per_token_compare_models({'original': effective_attens, \
                                                         # 'log-4bit': quant_att_log, \
                                                         # 'linear-4bit': quant_att_uni, \
                                                         # 'log-3bit': quant_att_log_3 \
-                                                        'clamped-2bit': quant_att_lut, \
-                                                        'rank-2bit': quant_att_rank
-                                                    }, 100, ylim=0.6, attached_title='')
+                                                        # 'clamped-7bit': quant_att_lut, \
+                                                        # 'rank-7bit': quant_att_rank, \
+                                                        # 'rank-6bit': quant_att_rank_6
+                                                    }, 100, ylim=1.0, attached_title='')
