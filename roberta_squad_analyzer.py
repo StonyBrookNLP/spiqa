@@ -782,7 +782,8 @@ def plot_stat_features(stat_features, features_to_plot=['max', 'min', 'std']):
 
 
 if __name__ == '__main__':
-    model_name = 'csarron/roberta-base-squad-v1'
+    # model_name = 'csarron/roberta-base-squad-v1'
+    model_name = 'csarron/bert-base-uncased-squad-v1'
 
     arg_parser = ag.ArgumentParser(description=__doc__)
     arg_parser.add_argument("-at", "--att_threshold", default=0.0,

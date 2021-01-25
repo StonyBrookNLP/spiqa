@@ -281,8 +281,8 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, spar
             else:
                 curr_ax.set_xlim([0, 0.02])
 
-            # fig.suptitle("Histogram for layer {} head {}(per token){}".format(
-                # layer_idx, head_idx, attached_title), fontsize=15, y=0.97)
+            fig.suptitle("Histogram for layer {} head {}(per token){}".format(
+                layer_idx, head_idx, attached_title), fontsize=16, y=0.93)
             fig.tight_layout(pad=1.5)
             plt.savefig(
                 RES_FIG_PATH+'at_hist_per_token_layer_{}_head_{}.png'.format(layer_idx, head_idx), dpi=160)
