@@ -243,7 +243,11 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, spar
                              color='C3', linewidth=0.5, linestyle='-', alpha=alpha_val)
 
             curr_ax.tick_params(labelsize=16)
+            curr_ax.tick_params(axis='y', colors='C0')
+            curr_ax.set_xlabel('attention values', fontsize=16)
+            curr_ax.set_ylabel('normalized density', fontsize=16)
             curr_ax2.tick_params(labelsize=16)
+            curr_ax2.tick_params(axis='y', colors='C3')
 
             # plot sparse hist if exist:
             if sparse_hist is not None:
@@ -279,9 +283,9 @@ def plot_atten_dist_per_token(data, bin_step, attn_max=None, attn_min=None, spar
 
             # fig.suptitle("Histogram for layer {} head {}(per token){}".format(
                 # layer_idx, head_idx, attached_title), fontsize=15, y=0.97)
-            fig.tight_layout(pad=2.2)
+            fig.tight_layout(pad=1.5)
             plt.savefig(
-                RES_FIG_PATH+'at_hist_per_token_layer_{}_head_{}.png'.format(layer_idx, head_idx), dpi=600)
+                RES_FIG_PATH+'at_hist_per_token_layer_{}_head_{}.png'.format(layer_idx, head_idx), dpi=160)
             plt.clf()
             plt.close(fig)
 

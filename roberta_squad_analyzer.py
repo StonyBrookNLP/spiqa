@@ -885,7 +885,7 @@ if __name__ == '__main__':
         # plot_sparsity_change(stat_filtered_spars, attached_title='')
 
     if args['otf_distribution']:
-        plot_dist_token_dynamic(model_name, 100, sparsity_bar=0.0, att_threshold=att_threshold, samples=samples, scale='log', attached_title='(per_token)')
+        plot_dist_token_dynamic(model_name, 100, sparsity_bar=1e-8, att_threshold=att_threshold, samples=samples, scale='log', attached_title='(per_token)')
 
     if args['hidden_states']:
         em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity, _, _, _, _, _ = \
