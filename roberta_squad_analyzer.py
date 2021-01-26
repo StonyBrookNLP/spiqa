@@ -907,17 +907,24 @@ if __name__ == '__main__':
         em_str = 'EM={:.2f}'.format(em_score*100)
         # quantization
         effective_attens = [atten[:, :, :atten.shape[-1], :] for atten in attens]
-        # quant_att_uni = tv.quantize_attention(effective_attens, 'uniform', 4)
-        # quant_att_log = tv.quantize_attention(effective_attens, 'log', 4)
-        # quant_att_log_3 = tv.quantize_attention(effective_attens, 'log', 3)
-        quant_att_lut = tv.quantize_attention(effective_attens, 'clamped-log', 7)
-        quant_att_rank = tv.quantize_attention(effective_attens, 'rank', 7)
-        quant_att_rank_6 = tv.quantize_attention(effective_attens, 'rank', 6)
-        tv.plot_atten_dist_per_token_compare_models({'original': effective_attens, \
+        quant_att_uni = tv.quantize_attention(effective_attens, 'uniform', 3)
+        quant_att_log = tv.quantize_attention(effective_attens, 'log', 3)
+        quant_att_lut = tv.quantize_attention(effective_attens, 'clamped-log', 3)
+        quant_att_rank = tv.quantize_attention(effective_attens, 'rank_head', 3)
+        # quant_att_rank_6 = tv.quantize_attention(effective_attens, 'rank', 6)
+        # tv.plot_atten_dist_per_token_compare_models({'original': effective_attens, \
                                                         # 'log-4bit': quant_att_log, \
                                                         # 'linear-4bit': quant_att_uni, \
                                                         # 'log-3bit': quant_att_log_3 \
                                                         # 'clamped-7bit': quant_att_lut, \
                                                         # 'rank-7bit': quant_att_rank, \
                                                         # 'rank-6bit': quant_att_rank_6
-                                                    }, 100, ylim=1.0, attached_title='')
+                                                    # }, 100, ylim=1.0, attached_title='')
+        diver = tv.compute_js_diver_quant_methods({'original': effective_attens, \
+                                                        'log-3bit': quant_att_log, \
+                                                        'linear-3bit': quant_att_uni, \
+                                                        'clamped-3bit': quant_att_lut, \
+                                                        'rank-3bit': quant_att_rank, \
+                                                        # 'rank-6bit': quant_att_rank_6
+                                                    }, 100)
+        print(diver)

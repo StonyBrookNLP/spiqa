@@ -10,6 +10,7 @@ import matplotlib.patches as mpatches
 import matplotlib.gridspec as gridspec
 from tqdm import tqdm
 from textwrap import wrap
+from scipy.spatial import distance
 from math import isnan, fsum, log, log2, ceil, floor
 from itertools import compress, product
 
@@ -414,6 +415,59 @@ def plot_atten_dist_per_token_compare_models(data_att: dict, bin_step, scale='lo
     plt.close(fig)
 
 
+def compute_js_diver_quant_methods(data_att: dict, bin_step, scale='log'):
+    if data_att.get('original', None) is None: 
+        raise KeyError('no original attention matrix in the data!') 
+
+    offset = 1e-10
+    hist_x_start, hist_x_end = log(offset, 10), log(1, 10)
+    if scale == 'linear':
+        offset = 0.0
+
+    attn_bins, attn_hists = get_bin_edges(bin_step, hist_x_start, hist_x_end, scale), {}
+
+    for att_idx, data in data_att.items():
+        single_attn_hist = None
+        for inst in data:
+            inst_attn_hist = np.apply_along_axis(
+                lambda x: np.histogram(x + offset, attn_bins, range=(0.0, 1.0))[0], -1,  inst)
+
+            single_attn_hist = inst_attn_hist if single_attn_hist is None else \
+                np.concatenate([single_attn_hist, inst_attn_hist], axis=-2)
+
+        # Normalization
+        attn_hists[att_idx] = np.apply_along_axis(lambda a: a / np.sum(a), -1, single_attn_hist)
+
+    res = {}
+    for keys in attn_hists.keys(): res[keys] = np.zeros((NUM_LAYERS, NUM_HEADS))
+
+    attn_hists['original'][attn_hists['original'] < 1e-3] = 0.0
+    
+    for model in tqdm(attn_hists.keys()):
+        for layer_idx in range(NUM_LAYERS):
+            for head_idx in range(NUM_HEADS):
+                temp_divergence = []
+                for ori_row, row in zip(attn_hists['original'][layer_idx][head_idx], attn_hists[model][layer_idx][head_idx]):
+                    temp_divergence.append((distance.jensenshannon(ori_row, row))**2)
+                
+                res[model][layer_idx][head_idx] = np.mean(temp_divergence)
+
+        if model == 'original': continue
+        fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+        c = ax.pcolormesh(res[model])
+        fig.colorbar(c, ax=ax)
+        ax.set_title(model)
+        plt.savefig(RES_FIG_PATH+'js_divergence_{}.pdf'.format(model))
+        plt.clf()
+        plt.close(fig)
+
+
+    #average on all heads and layers
+    for keys in res.keys():
+        res[keys] = np.mean(res[keys])
+
+    return res
+
 def plot_hs_dist_per_token(data, bin_step, attn_mask, scale='log', attached_title='', ylim=(0.2, 1)):
     """
     plotting hidden states per token's distribution.
@@ -712,7 +766,7 @@ def quantize_attention(atts: list, method: str, bits: int):
         return ret_att
 
     def log_quant(att, bits):
-        exp = np.floor(np.log2(att) + 0.5)
+        exp = np.floor(np.log2(att+1e-10) + 0.5)
         min_exp = -(2.0**bits-1)
         clamped_exp = np.copy(exp)
         clamped_exp[exp <= min_exp] = float("-inf")
@@ -732,7 +786,7 @@ def quantize_attention(atts: list, method: str, bits: int):
     def clamped_log(att, bits):
         min_exp = log2(1e-3)
         step = min_exp / (2.0**bits - 1)
-        exp = np.log2(att)
+        exp = np.log2(att+1e-10)
         clamped_exp = np.floor(exp / step + 0.5) * step
         clamped_exp[exp < (min_exp - step)] = float("-Inf")
         return np.power(2.0, clamped_exp)
