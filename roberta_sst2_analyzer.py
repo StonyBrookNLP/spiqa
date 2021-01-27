@@ -39,7 +39,7 @@ def extract_sst2(model_name, num_sentences):
     print("actual selected: ", len(sentences))
     return sentences, labels
 
-def run_model(model_name, input_tokens, labels, att_threshold=0.0, hs_threshold=0.0, quant_base=0.0, device="cuda"):
+def run_model(model_name, input_tokens, labels, att_threshold=0.0, hs_threshold=0.0, quantize_att_bits=0.0, quantize_hstat_bits=0.0, device="cuda"):
     model = AutoModelForSequenceClassification.from_pretrained(model_name)
     model.eval()
     model = model.to(device)
@@ -54,7 +54,8 @@ def run_model(model_name, input_tokens, labels, att_threshold=0.0, hs_threshold=
 
     with torch.no_grad():
         model_output = model(**input_tokens, labels=label, output_hidden_states=True, output_attentions=True, \
-                            att_threshold=att_threshold, hs_threshold=hs_threshold, head_mask=head_mask, quantize=quant_base)
+                            att_threshold=att_threshold, hs_threshold=hs_threshold, head_mask=head_mask, \
+                            quantize_att_bits=quantize_att_bits, quantize_hstat_bits=quantize_hstat_bits)
 
     #Summary stat of the model_output
     print ("Total items in the output tuple: ",len(model_output)) 
@@ -130,7 +131,7 @@ def get_sparse_hist_token(attn, offset, sparsity_bar=0.0):
     return sparse_hist
 
 
-def get_em_sparsity_from_sa(model_name: str, num_sentences: int, att_threshold=0.0, hs_threshold=0.0, quant_base=0.0, device='cuda'):
+def get_em_sparsity_from_sa(model_name: str, num_sentences: int, att_threshold=0.0, hs_threshold=0.0, att_quant_bits = 0.0, hstate_quant_bits = 0.0, device='cuda'):
     def chunks(lst, n):
         """Yield successive n-sized chunks from lst."""
         for i in range(0, len(lst), n):
@@ -172,7 +173,8 @@ def get_em_sparsity_from_sa(model_name: str, num_sentences: int, att_threshold=0
                 input_tokens[i] = input_tokens[i].to(device)
 
             loss, attentions, match_count = run_model(model_name, input_tokens, batch_labels, \
-                        att_threshold=att_threshold, hs_threshold=hs_threshold, quant_base=quant_base,  device=device)
+                        att_threshold=att_threshold, hs_threshold=hs_threshold, \
+                        quantize_att_bits=att_quant_bits, quantize_hstat_bits=hstate_quant_bits,  device=device)
                 
             def get_spars(x, axis): 
                 return x.shape[-1] ** 2 - np.count_nonzero(x[:, :, :, :], axis=axis)
@@ -229,17 +231,20 @@ if __name__ == "__main__":
                             required=False, help="evaluate model only without any plot")
     arg_parser.add_argument("-sa", "--samples", default=-1,
                             required=False, help="number of samples for distribution")
-    arg_parser.add_argument("-qb", "--quantize_base", default=0.0,
-                            required=False, help="base for quantization")
+    arg_parser.add_argument("-aq", "--att_quant_bits", default=0.0,
+                            required=False, help="base for attention quantization")
+    arg_parser.add_argument("-hq", "--hstate_quant_bits", default=0.0,
+                            required=False, help="base for hidden states quantization")
     
     args = vars(arg_parser.parse_args())
     att_threshold = float(args['att_threshold'])
     hs_threshold = float(args['hs_threshold'])
-    quant_base = float(args['quantize_base'])
+    att_quant_bits = float(args['att_quant_bits'])
+    hstate_quant_bits = float(args['hstate_quant_bits'])
     samples = int(args['samples'])
 
     if args['evaluation']:
-        get_em_sparsity_from_sa('textattack/roberta-base-SST-2', samples, att_threshold=att_threshold, hs_threshold=hs_threshold, quant_base=quant_base, device='cuda')
+        get_em_sparsity_from_sa('textattack/roberta-base-SST-2', samples, att_threshold=att_threshold, hs_threshold=hs_threshold, att_quant_bits=att_quant_bits, hstate_quant_bits=hstate_quant_bits, device='cuda')
 
     if args['distribution']:
         loss, attns = get_atten_per_token('textattack/roberta-base-SST-2', samples, att_threshold=att_threshold, hs_threshold=hs_threshold, stored_attentions=True)

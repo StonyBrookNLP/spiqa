@@ -156,7 +156,7 @@ def get_atten_hist_from_model(model_name: str, num_sentences: int, att_threshold
     print ("Shape of attention weight matrices", len(attentions), attentions[0].shape)
     return attentions, hists
 
-def evaluate_model(model_name: str, input_tokens, labels=None, att_threshold=0.0, hs_threshold=0.0, quant_base=0.0, device='cuda'):
+def evaluate_model(model_name: str, input_tokens, labels=None, att_threshold=0.0, hs_threshold=0.0, quantize_att_bits=0.0, quantize_hstat_bits=0.0, device='cuda'):
     head_mask = None
 
     attentions, attn_mask, hists, loss = None, None, None, 0.0
@@ -165,7 +165,8 @@ def evaluate_model(model_name: str, input_tokens, labels=None, att_threshold=0.0
     # run model
     with torch.no_grad():
         model_output = model(**input_tokens, output_hidden_states=True, output_attentions=True, labels=labels, \
-                                att_threshold=att_threshold, hs_threshold=hs_threshold, head_mask=head_mask, quantize=quant_base)
+                                att_threshold=att_threshold, hs_threshold=hs_threshold, head_mask=head_mask, \
+                                quantize_att_bits=quantize_att_bits, quantize_hstat_bits=quantize_hstat_bits)
     
     
     attentions = convert_att_to_np(model_output[3], input_tokens['attention_mask'])
@@ -176,7 +177,7 @@ def evaluate_model(model_name: str, input_tokens, labels=None, att_threshold=0.0
     print ("Shape of attention weight matrices", len(attentions), attentions[0].shape)
     return loss, attentions, hists
 
-def get_em_sparsity_from_masked_lm(model_name: str, num_sentences: int, att_threshold=0.0, hs_threshold=0.0, quant_base=0.0, device='cuda'):
+def get_em_sparsity_from_masked_lm(model_name: str, num_sentences: int, att_threshold=0.0, hs_threshold=0.0, quantize_att_bits=0.0, quantize_hstat_bits=0.0, device='cuda'):
     def chunks(lst, n):
         """Yield successive n-sized chunks from lst."""
         for i in range(0, len(lst), n):
@@ -209,7 +210,8 @@ def get_em_sparsity_from_masked_lm(model_name: str, num_sentences: int, att_thre
         for batch_inputs, batch_labels in zip(all_input_tokens, all_labels):
             inst_count += len(batch_labels)
             ppl, attentions, hidden_states = \
-                evaluate_model(model_name, batch_inputs, batch_labels, att_threshold=att_threshold, hs_threshold=hs_threshold, device=device, quant_base=quant_base)
+                evaluate_model(model_name, batch_inputs, batch_labels, att_threshold=att_threshold, hs_threshold=hs_threshold, device=device, \
+                    quantize_att_bits=quantize_att_bits, quantize_hstat_bits=quantize_hstat_bits)
                 
             def get_spars(x, axis): 
                 return x.shape[-1] ** 2 - np.count_nonzero(x[:, :, :, :], axis=axis)
@@ -386,7 +388,7 @@ def list_sparse_tokens_all(model_name, sparsity_bar=0.0, num_sentences=500):
     if torch.cuda.is_available(): model = model.to("cuda")
     
     # fetch data:
-    insts = extract_inst_wikipedia(num_sentences)
+    insts = extract_inst_wikipedia(model_name, num_sentences)
     # insts = ["The girl ran to a local pub to escape the din of her city.", 
     #         "I am a robot writing fantastic articles just like human-being.", 
     #         "Today is a beautiful day at new england area."]
@@ -437,18 +439,21 @@ if __name__ == "__main__":
                             required=False, help="evaluate model only without any plot")
     arg_parser.add_argument("-sa", "--samples", default=-1,
                             required=False, help="number of samples for distribution")
-    arg_parser.add_argument("-qb", "--quantize_base", default=0.0,
-                            required=False, help="base for quantization")
+    arg_parser.add_argument("-aq", "--att_quant_bits", default=0.0,
+                            required=False, help="base for attention quantization")
+    arg_parser.add_argument("-hq", "--hstate_quant_bits", default=0.0,
+                            required=False, help="base for hidden states quantization")
 
     args = vars(arg_parser.parse_args())
     att_threshold = float(args['att_threshold'])
     hs_threshold = float(args['hs_threshold'])
     samples = int(args['samples'])
-    quant_base = float(args['quantize_base'])
+    att_quant_bits = float(args['att_quant_bits'])
+    hstate_quant_bits = float(args['hstate_quant_bits'])
 
     # list_sparse_tokens_all("roberta-base", sparsity_bar=1e-8, num_sentences=8000)
     if args['evaluation']:
-        get_em_sparsity_from_masked_lm(model_name, samples, att_threshold=att_threshold, hs_threshold=hs_threshold, quant_base=quant_base)
+        get_em_sparsity_from_masked_lm(model_name, samples, att_threshold=att_threshold, hs_threshold=hs_threshold, quantize_att_bits=att_quant_bits, quantize_hstat_bits=hstate_quant_bits)
 
     if args['distribution']:
         attns, hists = get_atten_hist_from_model(model_name, samples, att_threshold=att_threshold, hs_threshold=hs_threshold)
