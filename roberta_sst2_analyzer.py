@@ -55,7 +55,7 @@ def run_model(model_name, input_tokens, labels, att_threshold=0.0, hs_threshold=
     with torch.no_grad():
         model_output = model(**input_tokens, labels=label, output_hidden_states=True, output_attentions=True, \
                             att_threshold=att_threshold, hs_threshold=hs_threshold, head_mask=head_mask, \
-                            quantize_att_bits=quantize_att_bits, quantize_hstat_bits=quantize_hstat_bits)
+                            quantize_att_bits=quantize_att_bits, quantize_hstate_bits=quantize_hstat_bits)
 
     #Summary stat of the model_output
     print ("Total items in the output tuple: ",len(model_output)) 
@@ -244,7 +244,7 @@ if __name__ == "__main__":
     samples = int(args['samples'])
 
     if args['evaluation']:
-        get_em_sparsity_from_sa('textattack/roberta-base-SST-2', samples, att_threshold=att_threshold, hs_threshold=hs_threshold, att_quant_bits=att_quant_bits, hstate_quant_bits=hstate_quant_bits, device='cuda')
+        get_em_sparsity_from_sa('textattack/roberta-base-SST-2', samples, att_threshold=att_threshold, hs_threshold=hs_threshold, att_quant_bits=att_quant_bits, hstate_quant_bits=hstate_quant_bits, device='cpu')
 
     if args['distribution']:
         loss, attns = get_atten_per_token('textattack/roberta-base-SST-2', samples, att_threshold=att_threshold, hs_threshold=hs_threshold, stored_attentions=True)

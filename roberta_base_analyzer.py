@@ -27,6 +27,7 @@ DATA_PATH = "./data"
 def extract_inst_wikipedia(model_name, num_sentences: int):
     dataset = load_dataset("wikipedia", "20200501.en", cache_dir=DATA_PATH, split='train[:10%]')
     random.seed(12331)
+    num_sentences = num_sentences if num_sentences > 0.0 else 5000
     dataset = random.sample(dataset['text'], num_sentences)
     insts = []
 
@@ -59,15 +60,18 @@ def prepare_masked_tokens(model_name, num_sentences, device):
     input_tokens, labels = [], []
     tokens_path_list = [i.replace('\\', '/') for i in glob.glob(DATA_PATH + '/mlm_tokens_*.npz')]
     labels_path_list = [i.replace('\\', '/') for i in glob.glob(DATA_PATH + '/mlm_labels_*.npy')]
+    tokens_path_list.sort()
+    labels_path_list.sort()
 
     if (len(tokens_path_list) > 0) and (len(labels_path_list) > 0):
+        print("loading prepared tokens...")
         for token_f, label_f in zip(tokens_path_list, labels_path_list):
             token_f_res, temp_token = np.load(token_f), {}
             for key in token_f_res.files:
                 temp_token[key] = token_f_res[key]
             input_tokens.append(temp_token)
             labels.append(np.load(label_f))
-
+        
     else:
         sentences = extract_inst_wikipedia(model_name, num_sentences)
         # sentences = extract_inst_squad(num_sentences)
@@ -98,7 +102,7 @@ def prepare_masked_tokens(model_name, num_sentences, device):
         for k in input_tokens[idx].keys():
             input_tokens[idx][k] = torch.Tensor(input_tokens[idx][k]).to(device).long()
         labels[idx] = torch.Tensor(labels[idx]).to(device).long()
-
+    
     return input_tokens, labels
 
 
@@ -166,7 +170,7 @@ def evaluate_model(model_name: str, input_tokens, labels=None, att_threshold=0.0
     with torch.no_grad():
         model_output = model(**input_tokens, output_hidden_states=True, output_attentions=True, labels=labels, \
                                 att_threshold=att_threshold, hs_threshold=hs_threshold, head_mask=head_mask, \
-                                quantize_att_bits=quantize_att_bits, quantize_hstat_bits=quantize_hstat_bits)
+                                quantize_att_bits=quantize_att_bits, quantize_hstate_bits=quantize_hstat_bits)
     
     
     attentions = convert_att_to_np(model_output[3], input_tokens['attention_mask'])
@@ -453,7 +457,7 @@ if __name__ == "__main__":
 
     # list_sparse_tokens_all("roberta-base", sparsity_bar=1e-8, num_sentences=8000)
     if args['evaluation']:
-        get_em_sparsity_from_masked_lm(model_name, samples, att_threshold=att_threshold, hs_threshold=hs_threshold, quantize_att_bits=att_quant_bits, quantize_hstat_bits=hstate_quant_bits)
+        get_em_sparsity_from_masked_lm(model_name, samples, att_threshold=att_threshold, hs_threshold=hs_threshold, quantize_att_bits=att_quant_bits, quantize_hstat_bits=hstate_quant_bits, device='cpu')
 
     if args['distribution']:
         attns, hists = get_atten_hist_from_model(model_name, samples, att_threshold=att_threshold, hs_threshold=hs_threshold)
