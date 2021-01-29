@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import matplotlib.patches as mpatches
 import matplotlib.gridspec as gridspec
+from brokenaxes import brokenaxes
 from tqdm import tqdm
 from textwrap import wrap
 from scipy.spatial import distance
@@ -415,46 +416,29 @@ def plot_atten_dist_per_token_compare_models(data_att: dict, bin_step, scale='lo
     plt.close(fig)
 
 
-def compute_js_diver_quant_methods(data_att: dict, bin_step, scale='log'):
+def compute_js_diver_quant_methods(data_att: dict, insts, scale='log'):
     if data_att.get('original', None) is None: 
         raise KeyError('no original attention matrix in the data!') 
-
-    offset = 1e-10
-    hist_x_start, hist_x_end = log(offset, 10), log(1, 10)
-    if scale == 'linear':
-        offset = 0.0
-
-    attn_bins, attn_hists = get_bin_edges(bin_step, hist_x_start, hist_x_end, scale), {}
-
-    for att_idx, data in data_att.items():
-        single_attn_hist = None
-        for inst in data:
-            inst_attn_hist = np.apply_along_axis(
-                lambda x: np.histogram(x + offset, attn_bins, range=(0.0, 1.0))[0], -1,  inst)
-
-            single_attn_hist = inst_attn_hist if single_attn_hist is None else \
-                np.concatenate([single_attn_hist, inst_attn_hist], axis=-2)
-
-        # Normalization
-        attn_hists[att_idx] = np.apply_along_axis(lambda a: a / np.sum(a), -1, single_attn_hist)
-
-    res = {}
-    for keys in attn_hists.keys(): res[keys] = np.zeros((NUM_LAYERS, NUM_HEADS))
-
-    attn_hists['original'][attn_hists['original'] < 1e-3] = 0.0
     
-    for model in tqdm(attn_hists.keys()):
+    res = {}
+    for keys in data_att.keys(): res[keys] = np.zeros((NUM_LAYERS, NUM_HEADS))
+
+    for model in tqdm(data_att.keys()):
+        if model == 'original': continue
         for layer_idx in range(NUM_LAYERS):
             for head_idx in range(NUM_HEADS):
-                temp_divergence = []
-                for ori_row, row in zip(attn_hists['original'][layer_idx][head_idx], attn_hists[model][layer_idx][head_idx]):
-                    temp_divergence.append((distance.jensenshannon(ori_row, row))**2)
+                for inst in range(insts):
+                    temp_divergence = []
+                    for ori_row, row in zip(data_att['original'][inst][layer_idx][head_idx], \
+                                            data_att[model][inst][layer_idx][head_idx]):
+                        temp_divergence.append((distance.jensenshannon(ori_row, row))**2)
                 
                 res[model][layer_idx][head_idx] = np.mean(temp_divergence)
 
-        if model == 'original': continue
-        fig, ax = plt.subplots(1, 1, figsize=(5, 5))
-        c = ax.pcolormesh(res[model])
+        fig, ax = plt.subplots(1, 1, figsize=(4, 4))
+        c = ax.pcolormesh(res[model], vmin=0.0, vmax=0.1)
+        ax.set_ylabel('layer')
+        ax.set_xlabel('head')
         fig.colorbar(c, ax=ax)
         ax.set_title(model)
         plt.savefig(RES_FIG_PATH+'js_divergence_{}.pdf'.format(model))
@@ -729,33 +713,40 @@ def plot_em_sparsity(sparsity_data: dict, second_axis_data={}, attached_title=''
     plt.close(fig)
 
 
-def plot_em_quant(sparsity_data: dict, attached_title='', normalize_score=False, append_to_fname='', reverse_y=False, percent=True, **kwargs):
+def plot_em_quant(sparsity_data: dict, bin_em=None, ori_em=None, attached_title='', normalize_score=False, append_to_fname='', reverse_y=False, percent=True, **kwargs):
     # plot em vs. quant
-    fig, ax = plt.subplots(figsize=(7, 5))
-    plt.xticks(fontsize=15)
+    fig = plt.figure(figsize=(5, 3.8))
+    # plt.xticks(fontsize=15)
     patches = []
-    ax.set_xlabel("#bits", fontsize=15)
-    ax.invert_xaxis()
-    
+    bax = brokenaxes(xlims=((16.5, 15.9), (5.5, 0.9)), despine=False)
+    bax.set_xlabel("#bits", labelpad=0)
+    bax.set_ylabel("accuracy", labelpad=20)
+    bax.invert_xaxis()
+
     for idx, (data_label, data) in enumerate(sparsity_data.items()):
-        quant_bits = [int(i) for i in data.index]
-        ax.set_ylabel("EM score", fontsize=15)
+        quant_bits = [int(i) for i in data.index]    
         patches.append(mpatches.Patch(color='C{}'.format(idx), label=data_label))
         scores = data['em']/data['em'].max() if normalize_score else data['em']
         if percent: scores = scores * 100
-        ax.plot(quant_bits, scores,
-                color='C{}'.format(idx), marker='s', markersize=4)
+        bax.plot(quant_bits, scores,
+                color='C{}'.format(idx), marker='s', markersize=4, alpha=0.65)
+    
+    if bin_em is not None: bax.axhline(bin_em, linestyle='--', color='r', alpha=0.7)
+    if ori_em is not None: 
+        bax.axhline(ori_em, linestyle='--', color='black')
+        bax.text(1.3, ori_em+0.3, 'original', fontsize=8, va='bottom', ha='center')
 
-    for label in ax.yaxis.get_majorticklabels(): label.set_fontsize(15)
-    if reverse_y: ax.invert_yaxis()
+    # for label in ax.yaxis.get_majorticklabels(): label.set_fontsize(15)
+    if reverse_y: bax.invert_yaxis()
+    bax.invert_xaxis()
 
     # ax.set_ylim([70, 90])
     # fig.suptitle(
     #     'Accuracy vs. Sparsity {}'.format(attached_title))
-    fig.tight_layout()
-    plt.legend(handles=patches, loc='lower left', **kwargs)
-    plt.grid(linestyle='--', alpha=0.5, color='grey')
-    plt.savefig(RES_FIG_PATH+'performance_vs_quantbits{}.pdf'.format(append_to_fname))
+    # fig.tight_layout()
+    bax.legend(handles=patches, loc='lower left', **kwargs)
+    bax.grid(linestyle='--', alpha=0.5, color='grey')
+    fig.savefig(RES_FIG_PATH+'performance_vs_quantbits{}.svg'.format(append_to_fname))
     plt.close(fig)
 
 
@@ -763,7 +754,7 @@ def quantize_attention(atts: list, method: str, bits: int):
     def uniform_quant(att, bits):
         base = 1.0/(2**bits-1)
         ret_att = np.floor(att / base + 0.5) * base
-        return ret_att
+        return ret_att + 1e-10
 
     def log_quant(att, bits):
         exp = np.floor(np.log2(att+1e-10) + 0.5)
@@ -851,7 +842,7 @@ def quantize_attention(atts: list, method: str, bits: int):
         quant_att += (att < 1.0) * 1.0 * compare_done_mask
         quant_att = quant_att * zero_masks
 
-        return quant_att
+        return quant_att + 1e-10
 
     quant_method = {'uniform': uniform_quant, 'log': log_quant, 'clamped-log': clamped_log, 'rank': ranking_quant, 'rank_head': ranking_quant_head}
     ret = [quant_method[method](att, bits) for att in atts]
