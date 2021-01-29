@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import matplotlib.patches as mpatches
 import matplotlib.gridspec as gridspec
-from brokenaxes import brokenaxes
 from tqdm import tqdm
 from textwrap import wrap
 from scipy.spatial import distance
@@ -714,6 +713,7 @@ def plot_em_sparsity(sparsity_data: dict, second_axis_data={}, attached_title=''
 
 
 def plot_em_quant(sparsity_data: dict, bin_em=None, ori_em=None, attached_title='', normalize_score=False, append_to_fname='', reverse_y=False, percent=True, **kwargs):
+    import brokenaxes
     # plot em vs. quant
     fig = plt.figure(figsize=(5, 3.8))
     # plt.xticks(fontsize=15)
