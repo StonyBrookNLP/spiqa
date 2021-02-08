@@ -34,7 +34,7 @@ def extract_sst2(model_name, num_sentences):
             sentences.append(sst2[d]['sentence'])
             labels.append(sst2[d]['label'])
         else:
-            break
+            continue
     
     print("actual selected: ", len(sentences))
     return sentences, labels
@@ -244,7 +244,7 @@ if __name__ == "__main__":
     samples = int(args['samples'])
 
     if args['evaluation']:
-        get_em_sparsity_from_sa('textattack/roberta-base-SST-2', samples, att_threshold=att_threshold, hs_threshold=hs_threshold, att_quant_bits=att_quant_bits, hstate_quant_bits=hstate_quant_bits, device='cpu')
+        get_em_sparsity_from_sa('textattack/roberta-base-SST-2', samples, att_threshold=att_threshold, hs_threshold=hs_threshold, att_quant_bits=att_quant_bits, hstate_quant_bits=hstate_quant_bits, device='cuda:0')
 
     if args['distribution']:
         loss, attns = get_atten_per_token('textattack/roberta-base-SST-2', samples, att_threshold=att_threshold, hs_threshold=hs_threshold, stored_attentions=True)

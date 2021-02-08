@@ -48,7 +48,8 @@ def get_em_quantbits(params_path: str, layer_aggregration='mean', avg_score=Fals
     extract em scores from all parameters for different quant bits
     '''
     params_path_list = os.listdir(params_path)
-    threshold_list = [int(i.replace('_', '.')) for i in params_path_list]
+    params_path_list = [i for i in params_path_list if i.isdigit()]
+    threshold_list = [float(i.replace('_', '.')) for i in params_path_list]
     sparsity_table = pd.DataFrame()
     params_path_list = [params_path + '/' + i + '/' for i in params_path_list]
 
@@ -64,81 +65,140 @@ def get_em_quantbits(params_path: str, layer_aggregration='mean', avg_score=Fals
 
     return sparsity_table.dropna().sort_index(ascending=False)
 
+
 if __name__ == '__main__':
     #roberta_squad
     roberta_squad_original = get_em_sparsities('./filtered_params/roberta-base-squad', avg_score=True)
-    roberta_squad_original_em = roberta_squad_original['em'].loc['0.0'] * 100
-    roberta_squad_quant_linear = get_em_quantbits('./quantized_params/roberta-squad-quant-linear', avg_score=True)
-    roberta_squad_quant_linear_clamped = get_em_quantbits('./quantized_params/roberta-squad-quant-linear-clamped', avg_score=True)
-    # roberta_squad_quant_clamped_log_1e2 = get_em_quantbits('./quantized_params/roberta-squad-quant-clamped-log-1e-2', avg_score=True)
-    roberta_squad_quant_clamped_log_1e3 = get_em_quantbits('./quantized_params/roberta-squad-quant-clamped-log-1e-3', avg_score=True)
-    roberta_squad_quant_log = get_em_quantbits('./quantized_params/roberta-squad-quant-log', avg_score=True)
-    # roberta_squad_quant_bin = get_em_quantbits('./quantized_params/roberta-squad-quant-bin', avg_score=True)
-    # roberta_squad_quant_rank = get_em_quantbits('./quantized_params/roberta-squad-quant-rank', avg_score=True)
-    # print(roberta_squad_original)
-    # print(roberta_squad_quant_clamped_log_1e3)
-    # #bert_squad
-    # bert_squad_quant_linear = get_em_quantbits('./quantized_params/bert-squad-quant-linear', avg_score=True)
-    # bert_squad_quant_log_zres = get_em_quantbits('./quantized_params/bert-squad-quant-log-zres', avg_score=True)
-    # bert_squad_quant_lut = get_em_quantbits('./quantized_params/bert-squad-quant-lut', avg_score=True)
-    # #roberta_mlm
-    # roberta_mlm_quant_linear = get_em_quantbits('./quantized_params/roberta-mlm-quant-linear')
-    # roberta_mlm_quant_log_zres = get_em_quantbits('./quantized_params/roberta-mlm-quant-log-zres')
-    # roberta_mlm_quant_lut = get_em_quantbits('./quantized_params/roberta-mlm-quant-lut')
+    roberta_squad_original_em = roberta_squad_original['em'].loc['0.0'] * 100.0
+    roberta_squad_quant_linear = get_em_quantbits('./quantized_params/roberta-squad-quant-linear-midval', avg_score=True)
+    roberta_squad_quant_linear_clamped = get_em_quantbits('./quantized_params/roberta-squad-quant-linear-clamped-midval', avg_score=True)
+    roberta_squad_quant_clamped_log_1e3 = get_em_quantbits('./quantized_params/roberta-squad-quant-log-clamped-midval', avg_score=True)
+    roberta_squad_quant_log = get_em_quantbits('./quantized_params/roberta-squad-quant-log-midval', avg_score=True)
+    roberta_squad_quant_bin = get_em_quantbits('./quantized_params/roberta-squad-quant-bin', avg_score=True)
+    roberta_squad_quant_rank = get_em_quantbits('./quantized_params/roberta-squad-quant-rank', avg_score=True)
+    tv.plot_em_quant({'RoBERTa SQuAD rank': roberta_squad_quant_rank}, break_start=15.9, break_end=9, append_to_fname="squad_rank_only")
+
+    #bert_squad
+    bert_squad_original = get_em_sparsities('./filtered_params/bert-base-uncased-squad', avg_score=True)
+    bert_squad_ori_em = bert_squad_original['em'].loc['0.0'] * 100.0
+    bert_squad_quant_linear = get_em_quantbits('./quantized_params/bert-squad-quant-linear-midval', avg_score=True)
+    bert_squad_quant_linear_clamped = get_em_quantbits('./quantized_params/bert-squad-quant-linear-clamped-midval', avg_score=True)
+    bert_squad_quant_log = get_em_quantbits('./quantized_params/bert-squad-quant-log-midval', avg_score=True)
+    bert_squad_quant_log_clamped = get_em_quantbits('./quantized_params/bert-squad-quant-log-clamped-midval', avg_score=True)
+    bert_squad_quant_boolean = get_em_quantbits('./quantized_params/bert-squad-quant-bin', avg_score=True)
+
+    # roberta_mlm
+    roberta_mlm_original = get_em_sparsities('./filtered_params/roberta-base-mlm')
+    roberta_mlm_original_ppl = roberta_mlm_original['em'].loc['0.0']
+    roberta_mlm_quant_linear = get_em_quantbits('./quantized_params/roberta-mlm-quant-linear-midval')
+    roberta_mlm_quant_linear_clamped = get_em_quantbits('./quantized_params/roberta-mlm-quant-linear-clamped-midval')
+    roberta_mlm_quant_log = get_em_quantbits('./quantized_params/roberta-mlm-quant-log-midval')
+    roberta_mlm_quant_log_clamped = get_em_quantbits('./quantized_params/roberta-mlm-quant-log-clamped-midval')
+
     # #bert_mlm
-    # bert_mlm_quant_linear = get_em_quantbits('./quantized_params/bert-mlm-quant-linear')
-    # bert_mlm_quant_log_zres = get_em_quantbits('./quantized_params/bert-mlm-quant-log-zres')
-    # bert_mlm_quant_lut = get_em_quantbits('./quantized_params/bert-mlm-quant-lut')
+    bert_mlm_original = get_em_sparsities('./filtered_params/bert-base-mlm')
+    bert_mlm_original_ppl = roberta_mlm_original['em'].loc['0.0']
+    bert_mlm_quant_linear = get_em_quantbits('./quantized_params/bert-mlm-quant-linear-midval')
+    bert_mlm_quant_linear_clamped = get_em_quantbits('./quantized_params/bert-mlm-quant-linear-clamped-midval')
+    bert_mlm_quant_log = get_em_quantbits('./quantized_params/bert-mlm-quant-log-midval')
+    bert_mlm_quant_log_clamped = get_em_quantbits('./quantized_params/bert-mlm-quant-log-clamped-midval')
     
     #sst2
     roberta_sst2_original = get_em_sparsities('./filtered_params/roberta-base-sa')
-    roberta_sst2_original_em = roberta_sst2_original['em'].loc['0.0'] * 100
-    roberta_sst2_linear = get_em_quantbits('./quantized_params/roberta-sst2-quant-linear')
-    roberta_sst2_linear_clamped = get_em_quantbits('./quantized_params/roberta-sst2-quant-linear-clamped')
-    roberta_sst2_log = get_em_quantbits('./quantized_params/roberta-sst2-quant-log')
-    roberta_sst2_log_clamped = get_em_quantbits('./quantized_params/roberta-sst2-quant-log-clamped')
+    roberta_sst2_original_em = roberta_sst2_original['em'].loc['0.0'] * 100.0
+    roberta_sst2_linear = get_em_quantbits('./quantized_params/roberta-sst2-quant-linear-midval')
+    roberta_sst2_linear_clamped = get_em_quantbits('./quantized_params/roberta-sst2-quant-linear-clamped-midval')
+    roberta_sst2_log = get_em_quantbits('./quantized_params/roberta-sst2-quant-log-midval')
+    roberta_sst2_log_clamped = get_em_quantbits('./quantized_params/roberta-sst2-quant-log-clamped-midval')
+    roberta_sst2_uniform_slog_clamped_mean = get_em_quantbits('./quantized_params/roberta-sst2-quant-uniform-slog-clamped-mean')
+    roberta_sst2_uniform_slog_mean = get_em_quantbits('./quantized_params/roberta-sst2-quant-uniform-slog-mean')
     roberta_sst2_1bit = get_em_quantbits('./quantized_params/roberta-sst2-quant-bin')
 
     #hstate quantization
-    roberta_squad_hquant_linear = get_em_quantbits('./quantized_params/hidden_states/roberta-squad-hquant-linear', avg_score=True)
-    roberta_squad_hquant_evenlog = get_em_quantbits('./quantized_params/hidden_states/roberta-squad-hquant-evenlog', avg_score=True)
-    roberta_squad_hquant_evenlog_smax = get_em_quantbits('./quantized_params/hidden_states/roberta-squad-hquant-evenlog-smax', avg_score=True)
-    roberta_squad_hquant_fixed5 = get_em_quantbits('./quantized_params/hidden_states/roberta-squad-hquant-fixed5', avg_score=True)
-    roberta_squad_hquant_fixed4 = get_em_quantbits('./quantized_params/hidden_states/roberta-squad-hquant-fixed4', avg_score=True)
+    # roberta_squad_hquant_linear = get_em_quantbits('./quantized_params/hidden_states/roberta-squad-hquant-linear', avg_score=True)
+    # roberta_squad_hquant_evenlog = get_em_quantbits('./quantized_params/hidden_states/roberta-squad-hquant-evenlog', avg_score=True)
+    # roberta_squad_hquant_evenlog_smax = get_em_quantbits('./quantized_params/hidden_states/roberta-squad-hquant-evenlog-smax', avg_score=True)
+    # roberta_squad_hquant_fixed5 = get_em_quantbits('./quantized_params/hidden_states/roberta-squad-hquant-fixed5', avg_score=True)
+    # roberta_squad_hquant_fixed4 = get_em_quantbits('./quantized_params/hidden_states/roberta-squad-hquant-fixed4', avg_score=True)
 
-    tv.plot_em_quant({'RoBERTa-uniform': roberta_squad_quant_linear, \
-                        'RoBERTa-uniform-clamped': roberta_squad_quant_linear_clamped, \
-                        # 'BERT-linear': bert_squad_quant_linear, \
-                        # 'RoBERTa-clamped-log(1e-2)': roberta_squad_quant_clamped_log_1e2, \
+    # SQuAD
+    tv.plot_em_quant({
+                        'RoBERTa-linear': roberta_squad_quant_linear, \
+                        'RoBERTa-linear-pruned': roberta_squad_quant_linear_clamped, \
                         'RoBERTa-log': roberta_squad_quant_log, \
-                        'RoBERTa-log-clamped': roberta_squad_quant_clamped_log_1e3, \
-                        # 'RoBERTa-bin': roberta_squad_quant_bin, \
-                        # 'BERT-log-zres': bert_squad_quant_log_zres, 'BERT-lut': bert_squad_quant_lut \
-                        }, ori_em=roberta_squad_original_em, append_to_fname='_squad')
+                        'RoBERTa-log-pruned': roberta_squad_quant_clamped_log_1e3, \
+                        'BERT-linear': bert_squad_quant_linear, \
+                        'BERT-linear-pruned': bert_squad_quant_linear_clamped, \
+                        'BERT-log': bert_squad_quant_log, 
+                        'BERT-log-pruned': bert_squad_quant_log_clamped,
+                        'RoBERTa-boolean': roberta_squad_quant_bin,
+                        'BERT-boolean': bert_squad_quant_boolean,
+                        }, 
+                        ori_em={'RoBERTa': roberta_squad_original_em, 'BERT': bert_squad_ori_em}, \
+                        ori_label_offset={'RoBERTa': [1.5, 1.7], 'BERT': [1.5, -2.5]},
+                        ylabel='EM score', break_end=9.5, append_to_fname='_squad_midval')
 
-    # tv.plot_em_quant({'RoBERTa-linear': roberta_mlm_quant_linear, 'RoBERTa-lut': roberta_mlm_quant_lut, \
-    #                     'RoBERTa-log-zres': roberta_mlm_quant_log_zres, \
-    #                     'BERT-linear': bert_mlm_quant_linear, 'BERT-lut': bert_mlm_quant_lut, \
-    #                     'BERT-log-zres': bert_mlm_quant_log_zres}, append_to_fname='_mlm', reverse_y=True, percent=False, fontsize=15)
+    print('roberta squad log clamped:', (roberta_squad_original_em - roberta_squad_quant_clamped_log_1e3['em'][3.0]*100)/roberta_squad_original_em)
+    print('bert squad log clamped:', (bert_squad_ori_em - bert_squad_quant_log_clamped['em'][3.0]*100)/bert_squad_ori_em)
 
-    tv.plot_em_quant({'RoBERTa-uniform': roberta_sst2_linear, 'RoBERTa-uniform-clamped': roberta_sst2_linear_clamped, 
-                        'RoBERTa-log': roberta_sst2_log, 'RoBERTa-log-clamped': roberta_sst2_log_clamped, 'RoBERTa-boolean': roberta_sst2_1bit}, \
-                        # bin_em=roberta_sst2_1bit, \
-                        ori_em=roberta_sst2_original_em, append_to_fname='_sst')
+    # MLM plot
+    tv.plot_em_quant({'RoBERTa-linear': roberta_mlm_quant_linear, 
+                        'RoBERTa-linear-pruned': roberta_mlm_quant_linear_clamped, 
+                        'RoBERTa-log': roberta_mlm_quant_log, 
+                        'RoBERTa-log-pruned': roberta_mlm_quant_log_clamped, 
+                        'BERT-linear': bert_mlm_quant_linear, 
+                        'BERT-linear-pruned': bert_mlm_quant_linear_clamped, 
+                        'BERT-log': bert_mlm_quant_log,
+                        'BERT-log-pruned': bert_mlm_quant_log_clamped
+                        }, 
+                        ori_em={'original': roberta_mlm_original_ppl, 'BERT': bert_mlm_original_ppl}, \
+                        ori_label_offset={'original': [1.5, 1.7], 'BERT': [1.5, -2.5]},
+                        break_start=15.9, break_end=9.5, ylabel='pseudo-perplexity',
+                        append_to_fname='_mlm_midval', reverse_y=True, yscale='log', percent=False)
+    
+    print('roberta mlm log clamped:', (roberta_mlm_original_ppl - roberta_mlm_quant_log_clamped['em'][3.0])/roberta_mlm_original_ppl)
+    print('bert mlm log clamped:', (bert_mlm_original_ppl - bert_mlm_quant_log_clamped['em'][3.0])/bert_mlm_original_ppl)
 
-    tv.plot_em_quant({'RoBERTa-linear-asym': roberta_squad_hquant_linear, 'RoBERTa-even-log': roberta_squad_hquant_evenlog, \
-                         'RoBERTa-even-log-smax': roberta_squad_hquant_evenlog_smax, \
-                         'RoBERTa-fixed5': roberta_squad_hquant_fixed5, \
-                         'RoBERTa-fixed4': roberta_squad_hquant_fixed4}, append_to_fname='_h_squad', fontsize=15)
+    # sst plot
+    tv.plot_em_quant({'RoBERTa-linear': roberta_sst2_linear, 
+                        'RoBERTa-linear-pruned': roberta_sst2_linear_clamped, 
+                        'RoBERTa-log': roberta_sst2_log, 
+                        'RoBERTa-log-pruned': roberta_sst2_log_clamped, 
+                        # 'RoBERTa-uniform-log': roberta_sst2_uniform_slog_mean, 
+                        # 'RoBERTa-uniform-log-pruned': roberta_sst2_uniform_slog_clamped_mean,
+                        'RoBERTa-boolean': roberta_sst2_1bit},
+                        ori_em={'RoBERTa': roberta_sst2_original_em},
+                        ori_label_offset={'RoBERTa': [1.5, 1.2]}, 
+                        break_end=8.5, append_to_fname='_sst_midval')
+    print('roberta sst log clamped:', (roberta_sst2_original_em - roberta_sst2_log_clamped['em'][2.0]*100)/roberta_sst2_original_em)
+
+    # tv.plot_em_quant({'RoBERTa-linear-asym': roberta_squad_hquant_linear, 'RoBERTa-even-log': roberta_squad_hquant_evenlog, \
+    #                      'RoBERTa-even-log-smax': roberta_squad_hquant_evenlog_smax, \
+    #                      'RoBERTa-fixed5': roberta_squad_hquant_fixed5, \
+    #                      'RoBERTa-fixed4': roberta_squad_hquant_fixed4}, append_to_fname='_h_squad', fontsize=15)
 
     # comparing mid val quantization
     # mid val sst2
-    roberta_sst2_linear_midval = get_em_quantbits('./quantized_params/roberta-sst2-quant-linear-midval')
-    roberta_sst2_linear_clamped_midval = get_em_quantbits('./quantized_params/roberta-sst2-quant-linear-clamped-midval')
-    roberta_sst2_log_midval = get_em_quantbits('./quantized_params/roberta-sst2-quant-log-midval')
-    roberta_sst2_log_clamped_midval = get_em_quantbits('./quantized_params/roberta-sst2-quant-log-clamped-midval')
+    # roberta_sst2_linear_midval = get_em_quantbits('./quantized_params/roberta-sst2-quant-linear-midval')
+    # roberta_sst2_linear_clamped_midval = get_em_quantbits('./quantized_params/roberta-sst2-quant-linear-clamped-midval')
+    # roberta_sst2_log_midval = get_em_quantbits('./quantized_params/roberta-sst2-quant-log-midval')
+    # roberta_sst2_log_clamped_midval = get_em_quantbits('./quantized_params/roberta-sst2-quant-log-clamped-midval')
 
-    tv.plot_em_quant({'RoBERTa-uniform-midval': roberta_sst2_linear_midval, 
-                        'RoBERTa-uniform-clamped-midval': roberta_sst2_linear_clamped_midval,
-                        'RoBERTa-log-clamped-midval': roberta_sst2_log_clamped_midval}, 
-                        ori_em=roberta_sst2_original_em, append_to_fname='_sst_midval')
+    # tv.plot_em_quant({'RoBERTa-uniform': roberta_sst2_linear_midval, 
+    #                     'RoBERTa-uniform-clamped': roberta_sst2_linear_clamped_midval,
+    #                     'RoBERTa-log': roberta_sst2_log_midval,
+    #                     'RoBERTa-log-clamped': roberta_sst2_log_clamped_midval,
+    #                     'RoBERTa-boolean': roberta_sst2_1bit}, 
+    #                     ori_em={'RoBERTa': roberta_sst2_original_em}, append_to_fname='_sst_midval')
+
+    # clamp threshold sweeping
+    roberta_sst2_thres_sweep = get_em_quantbits('./quantized_params/roberta-sst2-sweep-thres-log-midval')
+    roberta_mlm_thres_sweep = get_em_quantbits('./quantized_params/roberta-mlm-sweep-thres-log-midval')
+    roberta_squad_thres_sweep = get_em_quantbits('./quantized_params/roberta-squad-sweep-thres-log-clamped-midval', avg_score=True)
+    
+    tv.plot_em_clamp_thres({'RoBERTa-SST': roberta_sst2_thres_sweep, 
+                            'RoBERTa-SQuAD': roberta_squad_thres_sweep}, 
+                        ori_em={'SST/MLM': roberta_sst2_original_em, 'SQuAD': roberta_squad_original_em},
+                        ori_label_offset={'SST/MLM':[0.35, -4], 'SQuAD': [0.35, -4]}, 
+                        second_axis_data={'RoBERTa-MLM': roberta_mlm_thres_sweep}
+                        )

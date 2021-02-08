@@ -479,7 +479,7 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
         "question-answering",
         model=model_name,
         tokenizer=model_name,
-        device=0
+        device=-1
     )
 
     def get_bin_edges(bin_step):
@@ -701,7 +701,7 @@ def plot_em_sparsity(sparsity_data: dict, second_axis_data={}, attached_title=''
     ax.set_xlabel("sparsity", fontsize=15)
     
     for idx, (data_label, data) in enumerate(sparsity_data.items()):
-        ax.set_ylabel("EM score", fontsize=15)
+        ax.set_ylabel("EM score/Accuracy", fontsize=15)
         patches.append(mpatches.Patch(color='C{}'.format(idx), label=data_label))
         scores = data['em']/data['em'].max() if normalize_score else data['em'] * 100
         ax.plot(data['all'], scores,
@@ -782,8 +782,8 @@ def plot_stat_features(stat_features, features_to_plot=['max', 'min', 'std']):
 
 
 if __name__ == '__main__':
-    # model_name = 'csarron/roberta-base-squad-v1'
-    model_name = 'csarron/bert-base-uncased-squad-v1'
+    model_name = 'csarron/roberta-base-squad-v1'
+    # model_name = 'csarron/bert-base-uncased-squad-v1'
 
     arg_parser = ag.ArgumentParser(description=__doc__)
     arg_parser.add_argument("-at", "--att_threshold", default=0.0,
@@ -820,13 +820,13 @@ if __name__ == '__main__':
 
     if args['evaluation']:
         em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity, _, _, _, _, _ = \
-            get_hstates_attens(model_name, filter_inputs=False, force_reinfer=True,
+            get_hstates_attens(model_name, filter_inputs=False, force_reinfer=False,
                                single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples, att_quant_bits=att_quant_bits, hstate_quant_bits=hstate_quant_bits)
         em_str = 'EM={:.2f}'.format(em_score*100)
 
     if args['distribution']:
         em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity, q, k, v, scrs, att_out = \
-            get_hstates_attens(model_name, filter_inputs=False, force_reinfer=True,
+            get_hstates_attens(model_name, filter_inputs=False, force_reinfer=False,
                                single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples, att_quant_bits=att_quant_bits, hstate_quant_bits=hstate_quant_bits)
         em_str = 'EM={:.2f}'.format(em_score*100)
         stat_features = get_stat_features(
@@ -885,6 +885,13 @@ if __name__ == '__main__':
                                         'BERT MLM': bert_mlm_spars}, append_to_fname='', fontsize=15)
         # plot_sparsity_change(stat_filtered_spars, attached_title='')
 
+        print(tv.search_sparse_em_drop(roberta_squad_spars, 0.8))
+        # print(tv.search_sparse_em_drop(roberta_mlm_spars, 0.8))
+        print(tv.search_sparse_em_drop(roberta_sa_spars, 0.8))
+        # print(tv.search_sparse_em_drop(bert_mlm_spars, 0.8))
+        print(tv.search_sparse_em_drop(bert_qa_spars, 0.8))
+
+
     if args['otf_distribution']:
         plot_dist_token_dynamic(model_name, 100, sparsity_bar=1e-8, att_threshold=att_threshold, samples=samples, scale='log', attached_title='(per_token)')
 
@@ -907,11 +914,14 @@ if __name__ == '__main__':
         em_str = 'EM={:.2f}'.format(em_score*100)
         # quantization
         effective_attens = [atten[:, :, :atten.shape[-1], :] for atten in attens]
-        quant_att_uni = tv.quantize_attention(effective_attens, 'uniform', 3)
+        quant_att_lin = tv.quantize_attention(effective_attens, 'linear', 3)
+        quant_att_lin_clamped = tv.quantize_attention(effective_attens, 'clamped-linear', 3)
         quant_att_log = tv.quantize_attention(effective_attens, 'log', 3)
-        quant_att_lut = tv.quantize_attention(effective_attens, 'clamped-log', 3)
-        quant_att_rank = tv.quantize_attention(effective_attens, 'rank_head', 3)
-        # quant_att_rank_6 = tv.quantize_attention(effective_attens, 'rank', 6)
+        quant_att_log_clamped = tv.quantize_attention(effective_attens, 'clamped-log', 3)
+        quant_att_uniform_log = tv.quantize_attention(effective_attens, 'uniform-log', 3)
+        quant_att_uniform_log_clamped = tv.quantize_attention(effective_attens, 'uniform-clamped-log', 3)
+        # quant_att_rank_7 = tv.quantize_attention(effective_attens, 'rank_head', 7)
+        # quant_att_rank_6 = tv.quantize_attention(effective_attens, 'rank_head', 6)
         # tv.plot_atten_dist_per_token_compare_models({'original': effective_attens, \
                                                         # 'log-4bit': quant_att_log, \
                                                         # 'linear-4bit': quant_att_uni, \
@@ -921,10 +931,11 @@ if __name__ == '__main__':
                                                         # 'rank-6bit': quant_att_rank_6
                                                     # }, 100, ylim=1.0, attached_title='')
         diver = tv.compute_js_diver_quant_methods({'original': effective_attens, \
+                                                        'linear-3bit': quant_att_lin, \
+                                                        'clamped-linear-3bit': quant_att_lin_clamped, \
                                                         'log-3bit': quant_att_log, \
-                                                        'linear-3bit': quant_att_uni, \
-                                                        'clamped-3bit': quant_att_lut, \
-                                                        'rank-3bit': quant_att_rank, \
-                                                        # 'rank-6bit': quant_att_rank_6
-                                                    }, 100)
+                                                        'clamped-log-3bit': quant_att_log_clamped, \
+                                                        'uniform-log-3bit': quant_att_uniform_log,
+                                                        'uniform-log-clamped-3-bit': quant_att_uniform_log_clamped, 
+                                                    }, len(effective_attens))
         print(diver)

@@ -416,8 +416,15 @@ def plot_atten_dist_per_token_compare_models(data_att: dict, bin_step, scale='lo
 
 
 def compute_js_diver_quant_methods(data_att: dict, insts, scale='log'):
+    # np.seterr(all='raise')
     if data_att.get('original', None) is None: 
         raise KeyError('no original attention matrix in the data!') 
+    
+    def log_histogram(x, bin_step, xrange):
+        offset = 1e-10
+        hist_x_start, hist_x_end = log(offset, 10), log(1, 10)
+        attn_bins = get_bin_edges(bin_step, hist_x_start, hist_x_end, 'log')
+        return np.histogram(x + offset, attn_bins, range=xrange)
     
     res = {}
     for keys in data_att.keys(): res[keys] = np.zeros((NUM_LAYERS, NUM_HEADS))
@@ -430,20 +437,22 @@ def compute_js_diver_quant_methods(data_att: dict, insts, scale='log'):
                     temp_divergence = []
                     for ori_row, row in zip(data_att['original'][inst][layer_idx][head_idx], \
                                             data_att[model][inst][layer_idx][head_idx]):
-                        temp_divergence.append((distance.jensenshannon(ori_row, row))**2)
+                        if np.sum(row) == 0.0: row += 1e-10 
+                        ori_row_hist, _ = log_histogram(ori_row, 100, (0, 1.0))
+                        row_hist, _ = log_histogram(row, 100, (0, 1.0))
+                        temp_divergence.append((distance.jensenshannon(ori_row_hist, row_hist)))
                 
                 res[model][layer_idx][head_idx] = np.mean(temp_divergence)
 
-        fig, ax = plt.subplots(1, 1, figsize=(4, 4))
-        c = ax.pcolormesh(res[model], vmin=0.0, vmax=0.1)
-        ax.set_ylabel('layer')
-        ax.set_xlabel('head')
-        fig.colorbar(c, ax=ax)
-        ax.set_title(model)
-        plt.savefig(RES_FIG_PATH+'js_divergence_{}.pdf'.format(model))
-        plt.clf()
-        plt.close(fig)
-
+        # fig, ax = plt.subplots(1, 1, figsize=(4, 4))
+        # c = ax.pcolormesh(res[model], vmin=0.0, vmax=0.1)
+        # ax.set_ylabel('layer')
+        # ax.set_xlabel('head')
+        # fig.colorbar(c, ax=ax)
+        # ax.set_title(model)
+        # plt.savefig(RES_FIG_PATH+'js_divergence_{}.pdf'.format(model))
+        # plt.clf()
+        # plt.close(fig)
 
     #average on all heads and layers
     for keys in res.keys():
@@ -642,6 +651,13 @@ def plot_dist_diversity(data: dict, attached_title=''):
     plt.close(fig)
 
 
+def search_sparse_em_drop(dat, sparsity_level):
+    original = dat.at['0.0', 'em']
+    em_score = dat[dat['all'].gt(sparsity_level)]['em'][0]
+    sprasity = dat[dat['all'].gt(sparsity_level)]['all'][0]
+    print(sprasity)
+    return abs(original-em_score)/original
+
 def plot_spread_features(stat_features, model_name):
     fig, ax = plt.subplots(1, 1, figsize=(24, 4))
     means, stds, maxs, mins = (i.flatten() for i in stat_features)
@@ -712,15 +728,18 @@ def plot_em_sparsity(sparsity_data: dict, second_axis_data={}, attached_title=''
     plt.close(fig)
 
 
-def plot_em_quant(sparsity_data: dict, bin_em=None, ori_em=None, attached_title='', normalize_score=False, append_to_fname='', reverse_y=False, percent=True, **kwargs):
-    import brokenaxes
+def plot_em_quant(sparsity_data: dict, bin_em=None, ori_em=None, ori_label_offset=None, ylabel='accuracy', break_start=15.9, break_end=5.5, attached_title='', normalize_score=False, append_to_fname='', reverse_y=False, yscale='linear', ylims=None, percent=True, **kwargs):
+    from brokenaxes import brokenaxes
     # plot em vs. quant
-    fig = plt.figure(figsize=(5, 3.8))
+    fig = plt.figure(figsize=(5.2, 3.6))
     # plt.xticks(fontsize=15)
     patches = []
-    bax = brokenaxes(xlims=((16.5, 15.9), (5.5, 0.9)), despine=False)
-    bax.set_xlabel("#bits", labelpad=0)
-    bax.set_ylabel("accuracy", labelpad=20)
+    bax = brokenaxes(xlims=((16.5, break_start), (break_end, 0.9)), ylims=ylims,
+                        left=0.12,right=0.98,top=0.975,bottom=0.15,wspace=0.1,hspace=0.05, 
+                        despine=False)
+    bax.set_xlabel("#bits", labelpad=11)
+    bax.set_ylabel(ylabel, labelpad=26)
+    bax.set_yscale(yscale)
     bax.invert_xaxis()
 
     for idx, (data_label, data) in enumerate(sparsity_data.items()):
@@ -733,8 +752,9 @@ def plot_em_quant(sparsity_data: dict, bin_em=None, ori_em=None, attached_title=
     
     if bin_em is not None: bax.axhline(bin_em, linestyle='--', color='r', alpha=0.7)
     if ori_em is not None: 
-        bax.axhline(ori_em, linestyle='--', color='black')
-        bax.text(1.3, ori_em+0.3, 'original', fontsize=8, va='bottom', ha='center')
+        for k in ori_em.keys():
+            bax.axhline(ori_em[k], linestyle='--', color='black', alpha=0.5)
+            bax.text(ori_label_offset[k][0], ori_em[k]+ori_label_offset[k][1], k, fontsize=8, va='center', ha='center')
 
     # for label in ax.yaxis.get_majorticklabels(): label.set_fontsize(15)
     if reverse_y: bax.invert_yaxis()
@@ -744,11 +764,66 @@ def plot_em_quant(sparsity_data: dict, bin_em=None, ori_em=None, attached_title=
     # fig.suptitle(
     #     'Accuracy vs. Sparsity {}'.format(attached_title))
     # fig.tight_layout()
-    bax.legend(handles=patches, loc='lower left', **kwargs)
+    bax.legend(handles=patches, loc='lower left', bbox_to_anchor=(-0.01, 0.04))
     bax.grid(linestyle='--', alpha=0.5, color='grey')
-    fig.savefig(RES_FIG_PATH+'performance_vs_quantbits{}.svg'.format(append_to_fname))
+    fig.savefig(RES_FIG_PATH+'performance_vs_quantbits{}.pdf'.format(append_to_fname))
     plt.close(fig)
 
+
+def plot_em_clamp_thres(sparsity_data: dict, ori_em=None, ori_label_offset=None, second_axis_data={}, second_axis_ori_em=None, second_axis_ori_label_offset=None, attached_title='', normalize_score=False, append_to_fname='', reverse_y=False, percent=True, **kwargs):
+    # plot em vs. quant
+    fig, ax = plt.subplots(figsize=(5.2, 3.6))
+    # plt.xticks(fontsize=15)
+    patches = []
+    ax.set_xscale('log', base=10)
+    ax.set_xlabel("pruning threshold")
+    
+    for idx, (data_label, data) in enumerate(sparsity_data.items()):
+        quant_bits = [float(i) for i in data.index]
+        ax.set_ylabel("EM score/accuracy")
+        ax.yaxis.set_label_coords(-0.09, 0.42)
+        patches.append(mpatches.Patch(color='C{}'.format(idx), label=data_label))
+        scores = data['em']/data['em'].max() if normalize_score else data['em']
+        if percent: scores = scores * 100
+        ax.plot(quant_bits, scores,
+                color='C{}'.format(idx), marker='s', markersize=4, alpha=0.7)
+
+    if ori_em is not None: 
+        for k in ori_em.keys():
+            ax.axhline(ori_em[k], linestyle='--', color='black', alpha=0.5)
+            ax.text(ori_label_offset[k][0], ori_em[k]+ori_label_offset[k][1], k, fontsize=8, va='center', ha='center')
+
+    if len(second_axis_data.keys()) > 0:
+        ax2 = ax.twinx()
+        ax2.set_yscale('log')
+        ax2.set_ylabel('pseudo-perplexity')
+        for idx2, (data_label, data) in enumerate(second_axis_data.items()):
+            quant_bits = [float(i) for i in data.index]
+            patches.append(mpatches.Patch(color='C{}'.format(idx+idx2+1), label=data_label))
+            scores = data['em']/data['em'].max() if normalize_score else data['em']
+            ax2.plot(quant_bits, scores,
+                    color='C{}'.format(idx+idx2+1), marker='s', markersize=4)
+
+        if second_axis_ori_em is not None:
+            for k in second_axis_ori_em.keys():
+                ax2.axhline(second_axis_ori_em[k], linestyle='--', color='black', alpha=0.5)
+                ax2.text(second_axis_ori_label_offset[k][0], \
+                            second_axis_ori_em[k]+second_axis_ori_label_offset[k][1], k, fontsize=8, va='center', ha='center')
+    
+        # for label in ax2.yaxis.get_majorticklabels(): label.set_fontsize(15)
+        ax2.invert_yaxis()
+
+    if reverse_y: ax.invert_yaxis()
+
+    # ax.set_ylim([70, 90])
+    # fig.suptitle(
+    #     'Accuracy vs. Sparsity {}'.format(attached_title))
+    # fig.tight_layout(pad=1)
+    plt.legend(handles=patches, loc='lower left', **kwargs)
+    plt.grid(linestyle='--', alpha=0.5, color='grey')
+    plt.subplots_adjust(left=0.12,right=0.88,top=0.975,bottom=0.15)
+    plt.savefig(RES_FIG_PATH+'performance_vs_clamp_thres{}.pdf'.format(append_to_fname))
+    plt.close(fig)
 
 def quantize_attention(atts: list, method: str, bits: int):
     def uniform_quant(att, bits):
@@ -782,56 +857,107 @@ def quantize_attention(atts: list, method: str, bits: int):
         clamped_exp[exp < (min_exp - step)] = float("-Inf")
         return np.power(2.0, clamped_exp)
 
-    def ranking_quant(att, bits):
+    def linear_quant_midval(data, bits):
+        base = (1.0 - 0.0) / (2.0**bits)
+        cutpoints = [0.0] + [(i+1)*base for i in range(int(2.0**bits))]
+        offset_val = (cutpoints[0] + cutpoints[1]) / 2.0
+        res = np.floor(data / base) * base + offset_val
+        res[data < cutpoints[1]] = 0.0
+        return res
+
+    def linear_quant_clamped_midval(att, bits):
         min_val = 1e-3
-        def ranking_search(row):
-            num_ranks = int(2.0**bits - 1)
-            thresholds = [1.0 / num_ranks * i for i in range(1, num_ranks)]
-            return [np.argmax(row > threshold) for threshold in thresholds] 
+        base = (1.0 - min_val) / (2**int(bits)-1)
+        cutpoints = [0.0] + [(i+1)*base for i in range(int(2.0**bits-1))]
+        offset_val = (cutpoints[0] + cutpoints[1]) / 2
+        res = np.floor((att - min_val) / base + 0.5) * base + offset_val + min_val
+        res[att < min_val] = 0.0
+        return res
 
-        # get fixed ranking position using numpy
-        hist_x_start, hist_x_end = log(min_val, 10), log(1, 10)
-        bin_edges = 10**np.linspace(hist_x_start, hist_x_end, 100+1)
-        atts_np = np.apply_along_axis(
-                lambda x: np.histogram(x, bin_edges, range=(min_val, 1.0))[0], -1,  att)
-        atts_np = np.cumsum(np.apply_along_axis(lambda a: a / np.sum(a) if np.sum(a) > 0 else a, -1, atts_np), axis=-1)
-        rank_idx = np.apply_along_axis(ranking_search, -1, atts_np)
-        ranking_map = np.apply_along_axis(lambda x: bin_edges[x], -1, rank_idx)
-        value_clamp_to = np.apply_along_axis(lambda x: bin_edges[x-1], -1, rank_idx)
+    def log_quant_midval(att, bits):
+        min_val = 1e-10
+        min_exp = log2(min_val)
+        base = (0-min_exp) / (2.0**bits)
+        cutpoints = np.array([0.0] + [(i+1)*base for i in range(int(2.0**bits))])
+        offset_val = (cutpoints[2]-cutpoints[1])/2
+        res = np.floor((np.log2(att)-min_exp) / base, dtype=np.float64) * base + offset_val + min_exp
+        res[att < 2**(min_exp + cutpoints[1])] = np.float64('-Inf')
+        return 2.0**res
 
-        # fixed ranking position, from histogram observation
-        zero_masks, compare_done_mask = np.ones(att.shape), np.ones(att.shape)
-        zero_masks[att<min_val] = 0.0
+    def clamped_log_quant_midval(att, bits):
+        min_val = 1e-3
+        min_exp = log2(min_val)
+        base = (0-min_exp) / (2.0**bits - 1)
+        cutpoints = np.array([0.0] + [(i+1)*base for i in range(int(2.0**bits-1))])
+        offset_val = np.array([(i+j)/2 for i, j in zip(cutpoints[0:-1], cutpoints[1:])])
+        offset_val = (cutpoints[0]+cutpoints[1])/2
+        res = np.floor((np.log2(att)-min_exp) / base, dtype=np.float64) * base + offset_val + min_exp
+        res[att < min_val] = np.float64('-Inf')
+        return 2.0**res
+
+    def uniform_slog_quant(att, bits):
+        from math import log
+
+        att_std = np.copy(att).astype('float64')
+        att_std = np.sort(att_std)
+        num_ranks = int(2.0**bits)
+        log_threshs = [0.0,]
+
+        log_steps = np.array([len(att_std)//np.power(2, i) for i in range(1, num_ranks+1)] + [len(att_std)//np.power(2, num_ranks), ])
+        log_steps = np.cumsum(log_steps)[:-1]
+
+        log_threshs += [ att_std[i] for i in log_steps]
+
+        log_steps = np.insert(log_steps, 0, 0.0, axis=0)
+        # value_clamp_to = [(start+end)/2.0 for start, end in zip(log_threshs[:-1], log_threshs[1:])]
+        value_clamp_to = []
+        for start, end in zip(log_steps[:-1], log_steps[1:]):
+            value_clamp_to.append(np.mean(att_std[start:end]) if start < end else value_clamp_to[-1])
+
+        value_clamp_to = np.array(value_clamp_to)
+        ranking_map = log_threshs[1:]
+
+        if np.isnan(value_clamp_to[-1]): 
+            print("break here")
+
+        # fixed ranking position based on histogram
+        compare_done_mask = np.ones(att.shape)
         quant_att = np.zeros(att.shape)
-        for thres, val in zip(np.split(ranking_map, ranking_map.shape[-1], axis=-1), np.split(value_clamp_to, value_clamp_to.shape[-1], axis=-1)):
-            ranking_map_stacked = np.concatenate([thres]*quant_att.shape[-1], axis=-1)
-            val_stacked = np.concatenate([val]*quant_att.shape[-1], axis=-1)
-            quant_att += (att < ranking_map_stacked) * val_stacked * compare_done_mask
-            compare_done_mask = att >= ranking_map_stacked
+        for thres, val in zip(ranking_map, value_clamp_to):
+            quant_att += (att < thres) * val * compare_done_mask
+            compare_done_mask = (att >= thres) & (att > 0.0)
 
-        quant_att += (att < 1.0) * 1.0 * compare_done_mask
-        quant_att = quant_att * zero_masks
+        quant_att += (att < 1.0) * value_clamp_to[-1] * compare_done_mask 
 
         return quant_att
 
-
-    def ranking_quant_head(att, bits):
+    def uniform_slog_clamped_quant(att, bits):
+        from math import log
         min_val = 1e-3
-        def ranking_search(row):
-            num_ranks = int(2.0**bits - 1)
-            thresholds = [1.0 / num_ranks * i for i in range(1, num_ranks)]
-            return [np.argmax(row > threshold) for threshold in thresholds] 
 
-        # get fixed ranking position using numpy
-        hist_x_start, hist_x_end = log(min_val, 10), log(1, 10)
-        bin_edges = 10**np.linspace(hist_x_start, hist_x_end, 100+1)
-        atts_np = np.histogram(att.flatten(), bin_edges, range=(min_val, 1.0))[0]
-        atts_np = np.cumsum(atts_np / np.sum(atts_np))
-        rank_idx = ranking_search(atts_np)
-        ranking_map = bin_edges[rank_idx]
-        value_clamp_to = [(start+end)/2.0 for start, end in zip([min_val] + list(ranking_map[:-1]), ranking_map)]
+        att_std = np.copy(att).astype('float64')
+        att_std = np.sort(att_std[att_std>min_val])
+        num_ranks = int(2.0**bits - 1)
+        log_threshs = [min_val,]
 
-        # fixed ranking position based on histogram
+        log_steps = np.array([len(att_std)//np.power(2, i) for i in range(1, num_ranks)] + [len(att_std)//np.power(2, num_ranks-1), ])
+        log_steps = np.cumsum(log_steps)[:-1]
+
+        log_threshs += [ att_std[i] for i in log_steps]
+
+        log_steps = np.insert(log_steps, 0, 0.0, axis=0)
+        # value_clamp_to = [(start+end)/2.0 for start, end in zip(log_threshs[:-1], log_threshs[1:])]
+        value_clamp_to = []
+        for start, end in zip(log_steps[:-1], log_steps[1:]):
+            value_clamp_to.append(np.mean(att_std[start:end]) if start < end else value_clamp_to[-1])
+
+        value_clamp_to = np.array(value_clamp_to)
+        ranking_map = log_threshs[1:]
+
+        if np.isnan(value_clamp_to[-1]): 
+            print("break here")
+
+        #zero_mask for vals < 1e-3, compare_done_mask for labelling values that are quantized so far.
         zero_masks, compare_done_mask = np.ones(att.shape), np.ones(att.shape)
         zero_masks[att<min_val] = 0.0
         quant_att = np.zeros(att.shape)
@@ -839,12 +965,18 @@ def quantize_attention(atts: list, method: str, bits: int):
             quant_att += (att < thres) * val * compare_done_mask
             compare_done_mask = att >= thres
 
-        quant_att += (att < 1.0) * 1.0 * compare_done_mask
+        quant_att += (att < 1.0) * value_clamp_to[-1] * compare_done_mask 
+        #^this shouldn't ideally affect anything. Comment it.
         quant_att = quant_att * zero_masks
 
-        return quant_att + 1e-10
-
-    quant_method = {'uniform': uniform_quant, 'log': log_quant, 'clamped-log': clamped_log, 'rank': ranking_quant, 'rank_head': ranking_quant_head}
+        return quant_att
+        
+    quant_method = {'linear': linear_quant_midval, 
+                    'clamped-linear': linear_quant_clamped_midval, 
+                    'log': log_quant_midval, 
+                    'clamped-log': clamped_log_quant_midval, 
+                    'uniform-log': uniform_slog_quant, 
+                    'uniform-clamped-log': uniform_slog_clamped_quant}
     ret = [quant_method[method](att, bits) for att in atts]
     return ret
 
