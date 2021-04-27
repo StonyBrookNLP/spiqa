@@ -820,7 +820,7 @@ if __name__ == '__main__':
 
     if args['evaluation']:
         em_score, h_states, attens, att_max, att_min, att_mean, att_std, att_sparsity, _, _, _, _, _ = \
-            get_hstates_attens(model_name, filter_inputs=False, force_reinfer=False,
+            get_hstates_attens(model_name, filter_inputs=False, force_reinfer=True,
                                single_input=False, layer_aggregration='mean', att_threshold=att_threshold, hs_threshold=hs_threshold, sample_inputs=samples, att_quant_bits=att_quant_bits, hstate_quant_bits=hstate_quant_bits)
         em_str = 'EM={:.2f}'.format(em_score*100)
 
