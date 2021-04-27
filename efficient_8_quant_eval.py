@@ -59,7 +59,17 @@ def search_max_min(att, bits):
             curr_min_kl = kl
             curr_min_val = min_val
 
-    print(f'minimum min_val and kl divergence: {curr_min_val}, {kl}')
+    curr_min_kl, curr_max_val = float('inf'), 1.0
+    for max_val in tqdm(np.arange(1 - 3*1e-1, 1, 3*1e-4)):
+        quantized_att = linear_quant_clamped(all_att, bits, curr_min_val, max_val)
+        quantized_histogram = np.histogram(quantized_att, bins=200, range=(0.0, 1.0), weights=np.full(quantized_att.shape, 1./quantized_att.shape[0]))
+        kl = kl_div(original_histogram[0], quantized_histogram[0])
+        kl = np.mean(kl[kl < float('inf')])
+        if kl < curr_min_kl:
+            curr_min_kl = kl
+            curr_max_val = max_val
+
+    print(f'minimum min_val and kl divergence: {curr_min_val}, {curr_max_val}, {kl}')
 
 if __name__ == '__main__':
     # open dumped attention
