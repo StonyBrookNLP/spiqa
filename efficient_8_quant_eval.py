@@ -45,13 +45,25 @@ def linear_quant_clamped(att, bits, min_val, max_val):
     res[att > max_val] = max_val
     return res
 
-def search_max_min(att, bits):
+def quant_8_log(att, bits, min_val, max_val):
+    min_exp, max_exp = log2(min_val), log2(max_val)
+    base = (max_exp-min_exp) / (2.0**bits - 1)
+    cutpoints = [0.0] + [(i+1)*base for i in range(int(2.0**bits-1))]
+    print(cutpoints)
+    res = np.floor((np.log2(att)-min_exp) / base) * base + min_exp
+    res[att < 2**(cutpoints[1]+min_exp)] = float('-Inf')
+    res[att > max_val] = max_exp
+    print(res)
+    return 2**res
+
+def search_max_min(att, bits, method='linear'):
+    methods = {'linear': linear_quant_clamped, 'log': quant_8_log}
     all_att = np.concatenate([i.flatten() for i in att], axis=0)
     original_histogram = np.histogram(all_att, bins=200, range=(0.0, 1.0), weights=np.full(all_att.shape, 1./all_att.shape[0]))
     
     curr_min_kl, curr_min_val, curr_max_val = float('inf'), 0.0, 1.0
     for min_val, max_val in tqdm(list(product(np.arange(0.0, 0.002, 0.0001), np.arange(0.99, 1, 0.001)))):
-        quantized_att = linear_quant_clamped(all_att, bits, min_val, max_val)
+        quantized_att = methods[method](all_att, bits, min_val, max_val)
         quantized_histogram = np.histogram(quantized_att, bins=200, range=(0.0, 1.0), weights=np.full(quantized_att.shape, 1./quantized_att.shape[0]))
         kl = kl_div(original_histogram[0], quantized_histogram[0])
         kl = np.mean(kl[kl < float('inf')])
@@ -77,4 +89,4 @@ if __name__ == '__main__':
 
     print(f'{atten_len} instances has been loaded.')
 
-    search_max_min(all_attentions, 4.0)
+    search_max_min(all_attentions, 4.0, method='log')
