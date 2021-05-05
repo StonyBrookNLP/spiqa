@@ -41,7 +41,7 @@ def linear_quant_clamped(att, bits, min_val, max_val):
     base = (max_val - min_val) / (2**int(bits)-1)
     cutpoints = [0.0] + [(i+1)*base for i in range(int(2.0**bits-1))]
     res = np.floor((att - min_val) / base) * base + min_val
-    res[att < min_val] = 0.0
+    res[att < (cutpoints[1]+min_val)] = 0.0 
     res[att > max_val] = max_val
     return res
 
@@ -49,25 +49,16 @@ def search_max_min(att, bits):
     all_att = np.concatenate([i.flatten() for i in att], axis=0)
     original_histogram = np.histogram(all_att, bins=200, range=(0.0, 1.0), weights=np.full(all_att.shape, 1./all_att.shape[0]))
     
-    curr_min_kl, curr_min_val = float('inf'), 0.0
-    for min_val in tqdm(np.arange(0.0, 1e-1, 1e-4)):
-        quantized_att = linear_quant_clamped(all_att, bits, min_val, 1.0)
-        quantized_histogram = np.histogram(quantized_att, bins=200, range=(0.0, 1.0), weights=np.full(quantized_att.shape, 1./quantized_att.shape[0]))
-        kl = kl_div(original_histogram[0], quantized_histogram[0])
-        kl = np.mean(kl[kl < float('inf')])
-        if kl < curr_min_kl:
-            curr_min_kl = kl
-            curr_min_val = min_val
-
-    curr_min_kl, curr_max_val = float('inf'), 1.0
-    for max_val in tqdm(np.arange(1 - 3*1e-1, 1, 3*1e-4)):
-        quantized_att = linear_quant_clamped(all_att, bits, curr_min_val, max_val)
+    curr_min_kl, curr_min_val, curr_max_val = float('inf'), 0.0, 1.0
+    for min_val, max_val in tqdm(list(product(np.arange(0.0, 0.002, 0.0001), np.arange(0.99, 1, 0.001)))):
+        quantized_att = linear_quant_clamped(all_att, bits, min_val, max_val)
         quantized_histogram = np.histogram(quantized_att, bins=200, range=(0.0, 1.0), weights=np.full(quantized_att.shape, 1./quantized_att.shape[0]))
         kl = kl_div(original_histogram[0], quantized_histogram[0])
         kl = np.mean(kl[kl < float('inf')])
         if kl < curr_min_kl:
             curr_min_kl = kl
             curr_max_val = max_val
+            curr_min_val = min_val
 
     print(f'minimum min_val and kl divergence: {curr_min_val}, {curr_max_val}, {kl}')
 

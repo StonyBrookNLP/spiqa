@@ -128,6 +128,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
     
     res, pipeline_running_counter, fed_data_len = None, 0, len(fed_data)
     total_elem_count = 0
+    f1_score_sum = 0
     print("Among all inputs {}/{} are selected.".format(fed_data_len, len(associated_data)))
     # run the prediction
     for qa_pair in fed_data:
@@ -135,6 +136,8 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
         prediction = qa_pipeline(
             {'context': qa_pair['context'], 'question': qa_pair['question']}, max_seq_len=MAX_SEQ_LEN, att_threshold=att_threshold, hs_threshold=hs_threshold, head_mask=head_mask, quantize_att_bits=att_quant_bits, quantize_hstate_bits=hstate_quant_bits)
         em_score = max(compute_exact(prediction['answer'], gold_ans)
+                       for gold_ans in qa_pair['answers'])
+        f1_score = max(compute_f1(prediction['answer'], gold_ans)
                        for gold_ans in qa_pair['answers'])
         att_array = prediction['attentions']
         q_prbs, k_prbs, v_prbs, scrs_prbs, att_out_prbs = prediction['pipeline_prbs']
@@ -163,7 +166,8 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
             # res['v'] += v_prbs
             # res['scrs'] += scrs_prbs
             # res['att_out'] += att_out_prbs
-
+        
+        f1_score_sum += f1_score
         # collect attentions
         if sample_inputs > 0:
             res['attentions'] += att_array
@@ -192,7 +196,7 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
         #                 .format(len(res['attentions']), (idx0[0], idx1[0], idx2[0], idx3[0], idx4[0])))
         #             exit()
 
-        print(prediction['answer'], em_score, res['score'] / pipeline_running_counter)
+        print(prediction['answer'], res['score'] / pipeline_running_counter, f1_score_sum / pipeline_running_counter)
 
     res['sparsity'] = res['sparsity'].astype(float) / total_elem_count
     res['qa_pair_len'] = fed_data_len
