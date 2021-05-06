@@ -82,7 +82,7 @@ def search_max_min_original(att, bits, num_bins = 2048):
 
     min_kl = float('inf')
     idx_res = 0
-    for i in tqdm(list(np.arange(128, num_bins))):
+    for i in tqdm(list(np.arange(int(2**bits)+1, num_bins))):
         ref_dist_p = np.array(original_histogram[num_bins-i:])
         outliers_count = np.sum(original_histogram[:num_bins-i])
         ref_dist_p[0] += outliers_count
@@ -118,4 +118,4 @@ if __name__ == '__main__':
 
     print(f'{atten_len} instances has been loaded.')
 
-    search_max_min_original(all_attentions, 4.0)
+    search_max_min_original(all_attentions, 7.0)
