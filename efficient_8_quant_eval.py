@@ -74,12 +74,41 @@ def search_max_min(att, bits, method='linear'):
 
     print(f'minimum min_val and kl divergence: {curr_min_val}, {curr_max_val}, {kl}')
 
+
+def search_max_min_original(att, bits, num_bins = 2048):
+    all_att = np.concatenate([i.flatten() for i in att], axis=0)
+    original_histogram, edges = np.histogram(all_att, bins=num_bins, range=(0.0, 1.0))
+    hist_width = 1./2048.
+
+    min_kl = float('inf')
+    idx_res = 0
+    for i in tqdm(list(np.arange(128, num_bins))):
+        ref_dist_p = np.array(original_histogram[num_bins-i:])
+        outliers_count = np.sum(original_histogram[:num_bins-i])
+        ref_dist_p[0] += outliers_count
+
+        ref_dist_q_bins = np.array_split(ref_dist_p, int(2**bits))
+        ref_dist_q = []
+        for j in ref_dist_q_bins:
+            single_bin = [np.sum(j) / np.sum(j > 0)] * j.shape[0] * (j > 0)
+            ref_dist_q.extend(single_bin)
+
+        ref_dist_p = ref_dist_p / np.sum(ref_dist_p)
+        ref_dist_q = ref_dist_q / np.sum(ref_dist_q)
+        kl = kl_div(ref_dist_p, ref_dist_q)
+        kl = np.mean(kl[kl < float('inf')])
+        if kl < min_kl:
+            min_kl = kl
+            idx_res = num_bins - i
+
+    print(f'minimum min_val and kl divergence: {(idx_res+0.5)*hist_width}, {min_kl}')
+
 if __name__ == '__main__':
     # open dumped attention
     all_attentions = None
 
     input_type = "_sampled"
-    atten_path = PARAM_PATH + 'attentions' + input_type + '.npy'
+    atten_path = PARAM_PATH + 'attentions_sampled.npy'
     if os.path.isfile(atten_path):
         print("Loading parameters from file {}...".format(PARAM_PATH + input_type))
         atten_len = 0
@@ -89,4 +118,4 @@ if __name__ == '__main__':
 
     print(f'{atten_len} instances has been loaded.')
 
-    search_max_min(all_attentions, 4.0, method='log')
+    search_max_min_original(all_attentions, 4.0)

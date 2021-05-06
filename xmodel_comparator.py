@@ -139,6 +139,7 @@ if __name__ == '__main__':
                         ylabel='EM score', break_end=9.5, append_to_fname='_squad_midval')
 
     print('roberta squad log clamped:', (roberta_squad_original_em - roberta_squad_quant_clamped_log_1e3['em'][3.0]*100)/roberta_squad_original_em)
+    print(roberta_squad_quant_clamped_log_1e3)
     print('bert squad log clamped:', (bert_squad_ori_em - bert_squad_quant_log_clamped['em'][3.0]*100)/bert_squad_ori_em)
 
     # MLM plot
