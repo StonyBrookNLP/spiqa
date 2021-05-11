@@ -75,10 +75,15 @@ def search_max_min(att, bits, method='linear'):
     print(f'minimum min_val and kl divergence: {curr_min_val}, {curr_max_val}, {kl}')
 
 
-def search_max_min_original(att, bits, num_bins = 2048):
+def search_max_min_original(att, bits, num_bins = 2048, scale = 'linear'):
     all_att = np.concatenate([i.flatten() for i in att], axis=0)
-    original_histogram, edges = np.histogram(all_att, bins=num_bins, range=(0.0, 1.0))
-    hist_width = 1./2048.
+    bin_edges = 10**np.linspace(log(1e-4, 10), log(1, 10), num_bins+1)
+    if scale == 'log':
+        original_histogram, edges = np.histogram(all_att, bins=bin_edges, range=(0.0, 1.0))
+    elif scale == 'linear':
+        original_histogram, edges = np.histogram(all_att, bins=num_bins, range=(0.0, 1.0))
+
+    hist_width = [j-i for i, j in zip(edges[:-1], edges[1:])]
 
     min_kl = float('inf')
     idx_res = 0
@@ -101,7 +106,7 @@ def search_max_min_original(att, bits, num_bins = 2048):
             min_kl = kl
             idx_res = num_bins - i
 
-    print(f'minimum min_val and kl divergence: {(idx_res+0.5)*hist_width}, {min_kl}')
+    print(f'minimum min_val and kl divergence: {edges[idx_res]+hist_width[idx_res]/2}, {min_kl}, {idx_res}')
 
 if __name__ == '__main__':
     # open dumped attention
@@ -118,4 +123,4 @@ if __name__ == '__main__':
 
     print(f'{atten_len} instances has been loaded.')
 
-    search_max_min_original(all_attentions, 7.0)
+    search_max_min_original(all_attentions, 6.0, scale='log')
