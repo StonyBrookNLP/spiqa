@@ -2,6 +2,7 @@
 python script used to compare the performance across different models
 """
 
+from matplotlib.pyplot import ylim
 import numpy as np
 import pandas as pd
 import transformer_visualization as tv
@@ -48,8 +49,14 @@ def get_em_quantbits(params_path: str, layer_aggregration='mean', avg_score=Fals
     extract em scores from all parameters for different quant bits
     '''
     params_path_list = os.listdir(params_path)
-    params_path_list = [i for i in params_path_list if i.isdigit()]
-    threshold_list = [float(i.replace('_', '.')) for i in params_path_list]
+    def transfer_params_path(params_path_list):
+        for i in params_path_list:
+            try:
+                yield float(i.replace('_', '.'))
+            except ValueError:
+                print("failed translating params path to float.")
+
+    threshold_list = list(transfer_params_path(params_path_list))
     sparsity_table = pd.DataFrame()
     params_path_list = [params_path + '/' + i + '/' for i in params_path_list]
 
@@ -135,7 +142,7 @@ if __name__ == '__main__':
                         'BERT-boolean': bert_squad_quant_boolean,
                         }, 
                         ori_em={'RoBERTa': roberta_squad_original_em, 'BERT': bert_squad_ori_em}, \
-                        ori_label_offset={'RoBERTa': [1.5, 1.7], 'BERT': [1.5, -2.5]},
+                        ori_label_offset={'RoBERTa': [1.05, 2], 'BERT': [1.05, -3]},
                         ylabel='EM score', break_end=9.5, append_to_fname='_squad_midval')
 
     print('roberta squad log clamped:', (roberta_squad_original_em - roberta_squad_quant_clamped_log_1e3['em'][3.0]*100)/roberta_squad_original_em)
@@ -153,9 +160,9 @@ if __name__ == '__main__':
                         'BERT-log-pruned': bert_mlm_quant_log_clamped
                         }, 
                         ori_em={'original': roberta_mlm_original_ppl, 'BERT': bert_mlm_original_ppl}, \
-                        ori_label_offset={'original': [1.5, 1.7], 'BERT': [1.5, -2.5]},
+                        ori_label_offset={'original': [1.1, -1], 'BERT': [1.5, -2.5]},
                         break_start=15.9, break_end=9.5, ylabel='pseudo-perplexity',
-                        append_to_fname='_mlm_midval', reverse_y=True, yscale='log', percent=False)
+                        append_to_fname='_mlm_midval', reverse_y=True, yscale='log', percent=False, ylim=(1.5, 1e5))
     
     print('roberta mlm log clamped:', (roberta_mlm_original_ppl - roberta_mlm_quant_log_clamped['em'][3.0])/roberta_mlm_original_ppl)
     print('bert mlm log clamped:', (bert_mlm_original_ppl - bert_mlm_quant_log_clamped['em'][3.0])/bert_mlm_original_ppl)
@@ -168,9 +175,9 @@ if __name__ == '__main__':
                         # 'RoBERTa-uniform-log': roberta_sst2_uniform_slog_mean, 
                         # 'RoBERTa-uniform-log-pruned': roberta_sst2_uniform_slog_clamped_mean,
                         'RoBERTa-boolean': roberta_sst2_1bit},
-                        ori_em={'RoBERTa': roberta_sst2_original_em},
-                        ori_label_offset={'RoBERTa': [1.5, 1.2]}, 
-                        break_end=8.5, append_to_fname='_sst_midval')
+                        ori_em={'original': roberta_sst2_original_em},
+                        ori_label_offset={'original': [1.1, 2]}, 
+                        break_end=8.5, append_to_fname='_sst_midval', ylim=(50, 98))
     print('roberta sst log clamped:', (roberta_sst2_original_em - roberta_sst2_log_clamped['em'][2.0]*100)/roberta_sst2_original_em)
 
     # tv.plot_em_quant({'RoBERTa-linear-asym': roberta_squad_hquant_linear, 'RoBERTa-even-log': roberta_squad_hquant_evenlog, \
@@ -197,9 +204,29 @@ if __name__ == '__main__':
     roberta_mlm_thres_sweep = get_em_quantbits('./quantized_params/roberta-mlm-sweep-thres-log-midval')
     roberta_squad_thres_sweep = get_em_quantbits('./quantized_params/roberta-squad-sweep-thres-log-clamped-midval', avg_score=True)
     
-    tv.plot_em_clamp_thres({'RoBERTa-SST': roberta_sst2_thres_sweep, 
-                            'RoBERTa-SQuAD': roberta_squad_thres_sweep}, 
-                        ori_em={'SST/MLM': roberta_sst2_original_em, 'SQuAD': roberta_squad_original_em},
-                        ori_label_offset={'SST/MLM':[0.35, -4], 'SQuAD': [0.35, -4]}, 
-                        second_axis_data={'RoBERTa-MLM': roberta_mlm_thres_sweep}
-                        )
+    tv.plot_em_clamp_thres({'RoBERTa-SST': {'data': roberta_sst2_thres_sweep, 
+                                            'ori_em': roberta_sst2_original_em, 
+                                            'ori_em_offset': [1e-7, -3], 'ylabel': 'Accuracy'}, 
+                            'RoBERTa-SQuAD': {'data': roberta_squad_thres_sweep,
+                                            'ori_em': roberta_squad_original_em,
+                                            'ori_em_offset': [1e-7, -5], 'ylabel': 'EM score'},
+                            'RoBERTa-MLM': {'data': roberta_mlm_thres_sweep,
+                                            'ori_em': roberta_mlm_original_ppl,
+                                            'ori_em_offset': [1e-7, 5], 'ylabel': 'pseudo-perplexity'} 
+                            })
+
+    roberta_squad_spars = get_em_sparsities('filtered_params/roberta-base-squad', avg_score=True)
+    roberta_mlm_spars = get_em_sparsities('filtered_params/roberta-base-mlm')
+    roberta_sa_spars = get_em_sparsities('filtered_params/roberta-base-sa')
+    bert_mlm_spars = get_em_sparsities('filtered_params/bert-base-mlm')
+    bert_qa_spars = get_em_sparsities('filtered_params/bert-base-uncased-squad', avg_score=True)
+    tv.plot_em_sparsity({'RoBERTa SQuAD': {'data': roberta_squad_spars, 
+                                            'acc_type': 'EM score', 'downstream_type': 'QA', 'y_lim': (0, 100)},
+                            'BERT SQuAD': {'data': bert_qa_spars, 
+                                            'acc_type': 'EM score', 'downstream_type': 'QA', 'y_lim': (0, 100)}, 
+                            'RoBERTa SST-2': {'data': roberta_sa_spars, 
+                                            'acc_type': 'accuracy', 'downstream_type': 'SA', 'y_lim': (0, 100)},
+                            'RoBERTa MLM': {'data': roberta_mlm_spars, 
+                                            'acc_type': 'pseudo-perplexity', 'downstream_type': 'MLM', 'y_lim': (25, 0)},
+                            'BERT MLM': {'data': bert_mlm_spars, 
+                                            'acc_type': 'pseudo-perplexity', 'downstream_type': 'MLM', 'y_lim': (25, 0)}})

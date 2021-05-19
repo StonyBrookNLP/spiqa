@@ -1,6 +1,7 @@
 '''
 Plotting function for transformer hstate and attention visualization
 '''
+from datetime import date
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -689,57 +690,59 @@ def plot_spread_features(stat_features, model_name):
     plt.clf()
 
 
-def plot_em_sparsity(sparsity_data: dict, second_axis_data={}, attached_title='', normalize_score=False, append_to_fname='', **kwargs):
+def plot_em_sparsity(sparsity_data: dict, downstream_type={'QA': 0, 'SA': 1, 'MLM': 2}, normalize_score=False, append_to_fname='', **kwargs):
+    '''
+    required sparsity data: {'data label': {'data': DF, 'acc_type': str, 'downstream_type': str, 'y_lim': tuple}}
+    '''
     # plot em vs. sparsity
-    fig, ax = plt.subplots(figsize=(7, 5))
-    plt.xticks(fontsize=15)
-    patches = []
-    ax.set_xlabel("sparsity", fontsize=15)
-    
+    fig, ax_list = plt.subplots(1, len(downstream_type), figsize=(12, 3.6))
+    FSIZE=14
+    plt.xticks(fontsize=FSIZE)
+    downstream_counter = dict.fromkeys(downstream_type.keys(), 0)
+
     for idx, (data_label, data) in enumerate(sparsity_data.items()):
-        ax.set_ylabel("EM score", fontsize=15)
-        patches.append(mpatches.Patch(color='C{}'.format(idx), label=data_label))
-        scores = data['em']/data['em'].max() if normalize_score else data['em'] * 100
-        ax.plot(data['all'], scores,
-                color='C{}'.format(idx), marker='s', markersize=4)
+        ax = ax_list[downstream_type[data['downstream_type']]]
+        if downstream_counter[data['downstream_type']] == 0:
+            ax.set_xlabel("sparsity", fontsize=FSIZE)
+            ax.set_ylabel(data['acc_type'], fontsize=FSIZE)
+            ax.tick_params(axis='both', which='major', labelsize=FSIZE)
+            ax.grid(linestyle='--', alpha=0.5, color='grey')
+            ax.set_title(data['downstream_type'], fontsize=FSIZE)
+            if data['downstream_type'] == "MLM": ax.invert_yaxis()
+            ax.set_ylim(data['y_lim'])
+            ax.set_xlim((0, 1.04))
 
-    for label in ax.yaxis.get_majorticklabels(): label.set_fontsize(15)
-    
-    if len(second_axis_data.keys()) > 0:
-        ax2 = ax.twinx()
-        ax2.set_ylabel('pseudo-perplexity', fontsize=15)
-        for idx2, (data_label, data) in enumerate(second_axis_data.items()):
-            patches.append(mpatches.Patch(color='C{}'.format(idx+idx2+1), label=data_label))
-            scores = data['em']/data['em'].max() if normalize_score else data['em']
-            ax2.plot(data['all'], scores,
-                    color='C{}'.format(idx+idx2+1), marker='s', markersize=4)
-    
-    for label in ax2.yaxis.get_majorticklabels(): label.set_fontsize(15)
-    ax2.invert_yaxis()
+        scores = data['data']['em']/data['data']['em'].max() if normalize_score else data['data']['em'] * (1 if data['downstream_type'] == "MLM" else 100)
+        ax.plot(data['data']['all'], scores, color=f'C{idx}', marker='s', markersize=4, label=data_label)
 
+        downstream_counter[data['downstream_type']] += 1
 
-    # ax.set_ylim([30, 90])
-    # fig.suptitle(
-    #     'Accuracy vs. Sparsity {}'.format(attached_title))
+    for ax in ax_list: ax.legend(loc='lower left')
     fig.tight_layout()
-    plt.legend(handles=patches, loc='lower left', **kwargs)
-    plt.grid(linestyle='--', alpha=0.5, color='grey')
     plt.savefig(RES_FIG_PATH+'performance_vs_sparsity{}.pdf'.format(append_to_fname))
     plt.close(fig)
 
 
-def plot_em_quant(sparsity_data: dict, bin_em=None, ori_em=None, ori_label_offset=None, ylabel='accuracy', break_start=15.9, break_end=5.5, attached_title='', normalize_score=False, append_to_fname='', reverse_y=False, yscale='linear', ylims=None, percent=True, **kwargs):
+def plot_em_quant(sparsity_data: dict, bin_em=None, ori_em=None, ori_label_offset=None, ylabel='accuracy', break_start=15.9, break_end=5.5, attached_title='', normalize_score=False, append_to_fname='', reverse_y=False, yscale='linear', ylim=(0, 100), percent=True, **kwargs):
     from brokenaxes import brokenaxes
+    FSIZE=14
     # plot em vs. quant
-    fig = plt.figure(figsize=(5.2, 3.6))
-    # plt.xticks(fontsize=15)
+    plt.rc('font', size=FSIZE)  
+    plt.rc('legend', fontsize=FSIZE-1.5)
+    plt.rc('figure', titlesize=FSIZE)
+
+    fig = plt.figure(figsize=(5.2, 4))
     patches = []
-    bax = brokenaxes(xlims=((16.5, break_start), (break_end, 0.9)), ylims=ylims,
-                        left=0.12,right=0.98,top=0.975,bottom=0.15,wspace=0.1,hspace=0.05, 
+    bax = brokenaxes(xlims=((16.5, break_start), (break_end, 0.9)), 
+                        left=0.15,right=0.98,top=0.975,bottom=0.15,wspace=0.1,hspace=0.05, 
                         despine=False)
-    bax.set_xlabel("#bits", labelpad=11)
-    bax.set_ylabel(ylabel, labelpad=26)
+    
+
+    bax.set_xlabel("#bits", labelpad=11, fontsize=FSIZE)
+    bax.set_ylabel(ylabel, labelpad=26, fontsize=FSIZE)
+    
     bax.set_yscale(yscale)
+    bax.set_ylim(ylim)
     bax.invert_xaxis()
 
     for idx, (data_label, data) in enumerate(sparsity_data.items()):
@@ -754,74 +757,62 @@ def plot_em_quant(sparsity_data: dict, bin_em=None, ori_em=None, ori_label_offse
     if ori_em is not None: 
         for k in ori_em.keys():
             bax.axhline(ori_em[k], linestyle='--', color='black', alpha=0.5)
-            bax.text(ori_label_offset[k][0], ori_em[k]+ori_label_offset[k][1], k, fontsize=8, va='center', ha='center')
+            bax.text(ori_label_offset[k][0], ori_em[k]+ori_label_offset[k][1], k, fontsize=FSIZE-1.5, va='center', ha='right')
 
-    # for label in ax.yaxis.get_majorticklabels(): label.set_fontsize(15)
     if reverse_y: bax.invert_yaxis()
     bax.invert_xaxis()
-
+    # bax.set_major_locator('x', mticker.MultipleLocator(base=1.0))
+    
     # ax.set_ylim([70, 90])
     # fig.suptitle(
     #     'Accuracy vs. Sparsity {}'.format(attached_title))
     # fig.tight_layout()
-    bax.legend(handles=patches, loc='lower left', bbox_to_anchor=(-0.01, 0.04))
+    bax.legend(handles=patches, loc='lower left', bbox_to_anchor=(0.02, 0.04))
     bax.grid(linestyle='--', alpha=0.5, color='grey')
     fig.savefig(RES_FIG_PATH+'performance_vs_quantbits{}.pdf'.format(append_to_fname))
     plt.close(fig)
 
 
-def plot_em_clamp_thres(sparsity_data: dict, ori_em=None, ori_label_offset=None, second_axis_data={}, second_axis_ori_em=None, second_axis_ori_label_offset=None, attached_title='', normalize_score=False, append_to_fname='', reverse_y=False, percent=True, **kwargs):
+def plot_em_clamp_thres(sparsity_data: dict, attached_title='', normalize_score=False, append_to_fname='', percent=True, **kwargs):
+    '''
+    required sparsity data type: {'data label': {'data': DF, 'ori_em': float, 'ori_em_offset': tuple/list, 'ylabel': str}}
+    '''
+    FSIZE=14
     # plot em vs. quant
-    fig, ax = plt.subplots(figsize=(5.2, 3.6))
-    # plt.xticks(fontsize=15)
-    patches = []
-    ax.set_xscale('log', base=10)
-    ax.set_xlabel("pruning threshold")
+    fig, ax_list = plt.subplots(1, len(sparsity_data), figsize=(10, 3.6))
     
-    for idx, (data_label, data) in enumerate(sparsity_data.items()):
+    plt.rc('font', size=FSIZE)  
+    plt.rc('legend', fontsize=FSIZE)
+    plt.rc('figure', titlesize=FSIZE)
+    
+    for idx, (data_label, data_pack) in enumerate(sparsity_data.items()):
+        ax = ax_list[idx]
+        ax.set_xscale('log', base=10)
+        ax.set_xlabel('pruning threshold', fontsize=FSIZE)
+        ax.set_title(data_label)
+        if 'MLM' in data_label: 
+            ax.set_yscale('log')
+            ax.invert_yaxis()
+
+        data = data_pack['data']
         quant_bits = [float(i) for i in data.index]
-        ax.set_ylabel("EM score/accuracy")
-        ax.yaxis.set_label_coords(-0.09, 0.42)
-        patches.append(mpatches.Patch(color='C{}'.format(idx), label=data_label))
+        ax.set_ylabel(data_pack['ylabel'], fontsize=FSIZE)
+        ax.tick_params(axis='both', which='major', labelsize=FSIZE)
+        # ax.yaxis.set_label_coords(-0.09, 0.42)
+        # patches.append(mpatches.Patch(color='C{}'.format(idx), label=data_label))
         scores = data['em']/data['em'].max() if normalize_score else data['em']
-        if percent: scores = scores * 100
+        if percent and not ('MLM' in data_label): scores = scores * 100
         ax.plot(quant_bits, scores,
                 color='C{}'.format(idx), marker='s', markersize=4, alpha=0.7)
 
-    if ori_em is not None: 
-        for k in ori_em.keys():
-            ax.axhline(ori_em[k], linestyle='--', color='black', alpha=0.5)
-            ax.text(ori_label_offset[k][0], ori_em[k]+ori_label_offset[k][1], k, fontsize=8, va='center', ha='center')
+        if data_pack['ori_em'] is not None: 
+            ax.axhline(data_pack['ori_em'], linestyle='--', color='black', alpha=0.5)
+            ax.text(data_pack['ori_em_offset'][0], data_pack['ori_em'] + data_pack['ori_em_offset'][1], 
+                        "original", va='center', ha='center', fontsize=FSIZE)
+                        
+        ax.grid(linestyle='--', alpha=0.5, color='grey')
 
-    if len(second_axis_data.keys()) > 0:
-        ax2 = ax.twinx()
-        ax2.set_yscale('log')
-        ax2.set_ylabel('pseudo-perplexity')
-        for idx2, (data_label, data) in enumerate(second_axis_data.items()):
-            quant_bits = [float(i) for i in data.index]
-            patches.append(mpatches.Patch(color='C{}'.format(idx+idx2+1), label=data_label))
-            scores = data['em']/data['em'].max() if normalize_score else data['em']
-            ax2.plot(quant_bits, scores,
-                    color='C{}'.format(idx+idx2+1), marker='s', markersize=4)
-
-        if second_axis_ori_em is not None:
-            for k in second_axis_ori_em.keys():
-                ax2.axhline(second_axis_ori_em[k], linestyle='--', color='black', alpha=0.5)
-                ax2.text(second_axis_ori_label_offset[k][0], \
-                            second_axis_ori_em[k]+second_axis_ori_label_offset[k][1], k, fontsize=8, va='center', ha='center')
-    
-        # for label in ax2.yaxis.get_majorticklabels(): label.set_fontsize(15)
-        ax2.invert_yaxis()
-
-    if reverse_y: ax.invert_yaxis()
-
-    # ax.set_ylim([70, 90])
-    # fig.suptitle(
-    #     'Accuracy vs. Sparsity {}'.format(attached_title))
-    # fig.tight_layout(pad=1)
-    plt.legend(handles=patches, loc='lower left', **kwargs)
-    plt.grid(linestyle='--', alpha=0.5, color='grey')
-    plt.subplots_adjust(left=0.12,right=0.88,top=0.975,bottom=0.15)
+    plt.subplots_adjust(left=0.065,right=0.98,top=0.9,bottom=0.2, wspace=0.32)
     plt.savefig(RES_FIG_PATH+'performance_vs_clamp_thres{}.pdf'.format(append_to_fname))
     plt.close(fig)
 
