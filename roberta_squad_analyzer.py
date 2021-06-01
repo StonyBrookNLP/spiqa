@@ -1,5 +1,5 @@
 """
-roberta squad analyzer: analyzer sparsity of the roberta on squad 
+roberta squad analyzer: analyzing sparsity of the roberta on squad v1.1
 """
 
 from transformers import pipeline
@@ -196,7 +196,9 @@ def run_qa_pipeline(model_name: str, filter_inputs=True, single_input=True, samp
         #                 .format(len(res['attentions']), (idx0[0], idx1[0], idx2[0], idx3[0], idx4[0])))
         #             exit()
 
-        print(prediction['answer'], res['score'] / pipeline_running_counter, f1_score_sum / pipeline_running_counter)
+        print("ans: ", prediction['answer'], 
+                "EM: ", res['score'] / pipeline_running_counter, 
+                "F1:", f1_score_sum / pipeline_running_counter)
 
     res['sparsity'] = res['sparsity'].astype(float) / total_elem_count
     res['qa_pair_len'] = fed_data_len
@@ -299,7 +301,7 @@ def get_hstates_attens(model_name: str, force_reinfer=False, filter_inputs=True,
         with open(att_out_path, 'wb+') as att_out_file:
             for i in att_out: np.save(att_out_file, i)
 
-    print("total score: ", total_score, "#QA pair: ", qa_pair_count,
+    print("EM score: ", total_score, "#QA pair count: ", qa_pair_count,
           "hidden_state dim: ", all_hidden_states.shape,
           "max dim:", all_max.shape, "min dim:", all_min.shape,
           "mean dim:", all_mean.shape, "std dim:", all_std.shape,
@@ -417,7 +419,7 @@ def plot_dist(data, bin_step, sparsity_bar=0.025, single_head_idx=None, layer_ag
             for head_idx, head in enumerate(layer):
                 sparsity = (head <= (sparsity_bar)).sum() // head.flatten().shape[0]
                 atten_layers['head_{}, max: {:.4f}, min: {:.4f}, spars: {:.4f}, sparsity_bar: {:.4f}'.format(
-                    head_idx, torch.max(head), torch.min(head), sparsity, sparsity_bar)] = (head.flatten()+offset).tolist()
+                    head_idx, np.max(head), np.min(head), sparsity, sparsity_bar)] = (head.flatten()+offset).tolist()
 
             atten_layers_pd = pd.DataFrame(atten_layers)
             # create vars for plotting
