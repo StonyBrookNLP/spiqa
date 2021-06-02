@@ -83,6 +83,7 @@ to collect the pruned and quantized attention for 100 instances with the thresho
 python roberta_squad_analyzer.py -e -sa 100 -at 0.001 -aq 3
 ```
 Their are different ways to quantize the attention:
+
 | function call                                               | quantization method name                        | assigned value                          |
 | ----------------------------------------------------------- | ----------------------------------------------- | --------------------------------------- |
 | quantize_attention_linear_slinear(attention, bits)          | uniform quantization, linear scale, w/o pruning | the closest bin edge to the original    |
@@ -96,7 +97,6 @@ Their are different ways to quantize the attention:
 | quantize_attention_uniform_slog_clamped_mean(att, bits)     | uniform quantization, log scale, w/ pruning     | average of the original in each bin     |
 | quantize_attention_uniform_slog_mean(att, bits)             | uniform quantization, log scale, w/o pruning    | average of the original in each bin     |
 | quantize_attention_binarization(att, bits=1)                | binarization                                    | 0 or 1.0/(number of values > threshold) |
-
 
 replace the [quantization function call](https://github.com/chickenjohn/spiqa-forked-transformers/blob/8da62ec5524aa6b6e363a92c0c9ca659a812cee3/src/transformers/modeling_bert.py#L562) with the desired quantization method:
 ```python
