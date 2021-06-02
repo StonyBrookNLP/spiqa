@@ -538,8 +538,10 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
             associated_data.append(context_ques_pair)
         
         # fixed random seed to select same subsets of the instances every time for comparison
-        random.seed(123)
-        associated_data = random.sample(sum(associated_data, []), samples)
+        if samples > 0:
+            random.seed(123)
+            associated_data = random.sample(sum(associated_data, []), samples)
+        
         input_lens = [len(i['context']+i['question']) for i in associated_data]
         print("QA string pair length: [{}, {}]".format(min(input_lens), max(input_lens)))
         pipeline_running_counter, fed_data_len = 0, len(associated_data)
@@ -560,7 +562,6 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
 
             for att in prediction['attentions']:
                 att = att[:, :, :att.shape[-1], :]
-                print("min:", np.amin(att[att.nonzero()]))
                 curr_hist = np.apply_along_axis(lambda a: np.histogram(a+offset, atten_bins, range=(0.0, 1.0))[0], -1, att)
                 atten_hist = [curr_hist] if atten_hist is None else atten_hist + [curr_hist]
                 curr_sparse_count = np.apply_along_axis(lambda a: float((a <= sparsity_bar).sum()) / att.shape[-1], -1, att)
@@ -570,9 +571,7 @@ def plot_dist_token_dynamic(model_name, bin_step, sparsity_bar=0.025, att_thresh
                 curr_max, curr_min = np.amax(att, axis=(-2, -1)), np.amin(att, axis=(-2, -1))
                 curr_token_count = np.cumsum(np.flip(np.sort(att, axis=-1), axis=-1), axis=-1)
                 curr_token_count = np.apply_along_axis(lambda x: np.argmax(x > 0.5), -1, curr_token_count)
-                print(curr_token_count.shape)
                 curr_token_percentage = curr_token_count / att.shape[-1]
-                print(curr_token_percentage.shape)
                 sparse_token_count = [curr_token_count] if sparse_token_count is None else  sparse_token_count + [curr_token_count]
                 sparse_token_percentage = [curr_token_percentage] if sparse_token_percentage is None else sparse_token_percentage + [curr_token_percentage]
 
