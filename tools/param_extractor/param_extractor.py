@@ -10,8 +10,19 @@ from FloatingFixedToHex import ffth
 import torch
 import numpy as np
 import random
+import csv
 
 MAX_SEQ_LEN = 320
+
+def export_param(variables: list, file_name: str):
+    try:
+        for var in variables:
+            str_var = [['{0:0>8}'.format(ffth.float_to_hex(i)) for i in row] for row in var]
+            with open(file_name, "w+", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerows(str_var)
+    except TypeError:
+        print('not iterable')
 
 def extract_qkv_weights_biases(model, layer_id, ops_id='q'):
     '''
@@ -74,6 +85,8 @@ if __name__ == '__main__':
     weights = weights.detach().cpu().numpy()
     biases = biases.detach().cpu().numpy()
     print(weights.shape, biases.shape)
+    # save numbers to txt:
+    np.savetxt("weights.txt", weights, fmt='%.8e', delimiter=',')
 
     # extract input embeddings:
     embd_outputs = extract_attention_layer_inputs(qa_pipeline)
@@ -81,3 +94,5 @@ if __name__ == '__main__':
     # extract q, k, v:
     q, k, v = extract_qkv(qa_pipeline)
     print(q.shape)
+
+    
