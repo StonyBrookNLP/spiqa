@@ -103,8 +103,33 @@ replace the [quantization function call](https://github.com/chickenjohn/spiqa-fo
 # replace quantize_attention_linear_slog_clamped_midval as needed
 attention_probs = self.quantize_attention_linear_slog_clamped_midval(attention_probs, quantize)
 ```
+To help reproducing our results on how the quantization affects the model accuracy, we provide our experiment data online.
+The way to reproduce the figures is:
+```bash
+./download_quant_params.sh
+python xmodel_comparator.py
+```
 
 ### Observation
 1. We observed the high levels of inherent sparsity in the attention distributions, which widely exists in the heads and layers
 2. most attention values can be pruned (i.e. set to zero) and the remaining non-zero values can be mapped to a small number of discrete-levels (i.e. unique values)  without any significant impact on accuracy. Approximately 80\% of the values can be set to zero without significant impact on the accuracy for QA and sentiment analysis tasks.
 3. when we add quantization utilizing a log-scaling, we find a 3-bit discrete representation is sufficient to achieve accuracy within 1\% of using the full floating points of the original model.
+
+## Citation
+```tex
+@inproceedings{ji-etal-2021-on,
+    title = "{O}n the {D}istribution, {S}parsity, and 
+{I}nference-time {Q}uantization of {A}ttention {V}alues in {T}ransformers",
+    author = "Ji, Tianchu  and
+      Jain, Shraddhan  and
+      Ferdman, Michael and
+      Milder, Peter and
+      Schwartz, H. Andrew and
+      Balasubramanian, Niranjan",
+    booktitle = "Findings of the Association for Computational Linguistics: ACL 2021",
+    month = aug,
+    year = "2021",
+    address = "Online",
+    publisher = "Association for Computational Linguistics"
+}
+```
