@@ -16,9 +16,9 @@ MAX_SEQ_LEN = 320
 
 def export_param(variables: list, file_name: str):
     try:
-        for var in variables:
+        for head, var in enumerate(variables):
             str_var = [['{0:0>8}'.format(ffth.float_to_hex(i)) for i in row] for row in var]
-            with open(file_name, "w+", newline="") as f:
+            with open(file_name + f"{head}.txt", "w+", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerows(str_var)
     except TypeError:
@@ -26,7 +26,9 @@ def export_param(variables: list, file_name: str):
 
 def extract_qkv_weights_biases(model, layer_id, ops_id='q'):
     '''
-    return: weights and biases in pytorch tensor
+    return: weights and biases of the Q, K, V in pytorch tensor.
+    weights shape: (768, 768)
+    biases shape: (768,)
     '''
     ops_id_lut = {'q':'query', 'k':'key', 'v':'value'}
     weights, biases = None, None
@@ -40,6 +42,27 @@ def extract_qkv_weights_biases(model, layer_id, ops_id='q'):
                 weights = param if split_name[-1] == 'weight' else weights
                 biases = param if split_name[-1] == 'bias' else biases
                 print(f'{split_name[-1]} of {split_name[2]} {split_name[3]} {split_name[-2]} extracted.')
+
+    return weights, biases
+
+def extract_attention_dense_weights_biases(model, layer_id):
+    '''
+    return: weights and biases of the attention output dense layer in pytorch tensor.
+    weights shape: (768, 768)
+    biases shape: (768,)
+    '''
+    weights, biases = None, None
+    with torch.no_grad():
+        for name, param in model.named_parameters():
+            split_name = name.split('.')
+            # roberta.encoder.layer.0.attention.output.dense.weight
+            if split_name[1] == 'encoder' and \
+                split_name[4] == 'attention' and \
+                int(split_name[3]) == layer_id and \
+                split_name[-3] == "output" and split_name[-2] == "dense":
+                weights = param if split_name[-1] == 'weight' else weights
+                biases = param if split_name[-1] == 'bias' else biases
+                print(f'{split_name[-1]} of {split_name[2]} {split_name[3]} {split_name[-3]}.{split_name[-2]} extracted.')
 
     return weights, biases
 
@@ -84,9 +107,16 @@ if __name__ == '__main__':
     # transform weights and biases to numpy array for the convenience
     weights = weights.detach().cpu().numpy()
     biases = biases.detach().cpu().numpy()
-    print(weights.shape, biases.shape)
-    # save numbers to txt:
-    np.savetxt("weights.txt", weights, fmt='%.8e', delimiter=',')
+    weights_list = np.split(weights, 12, axis=-1)
+    print(weights_list[0].shape, biases.shape)
+    # save numbers:
+    export_param(weights_list, "layer_2_v_weights")
+
+    dense_weights, dense_biases = extract_attention_dense_weights_biases(model, 2)
+    # transform weights and biases to numpy array for the convenience
+    dense_weights = dense_weights.detach().cpu().numpy()
+    dense_biases = dense_biases.detach().cpu().numpy()
+    export_param([dense_weights], "layer_2_dense_weights")
 
     # extract input embeddings:
     embd_outputs = extract_attention_layer_inputs(qa_pipeline)
